@@ -1,0 +1,54 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ovo-wpp-app
+    restart: unless-stopped
+    working_dir: /var/www/html
+    volumes:
+      - .:/var/www/html
+      - ./core/storage:/var/www/html/core/storage
+    depends_on:
+      - db
+    networks:
+      - app-network
+
+  web:
+    image: nginx:alpine
+    container_name: ovo-wpp-web
+    restart: unless-stopped
+    ports:
+      - "9000:80"
+    volumes:
+      - .:/var/www/html
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - app
+    networks:
+      - app-network
+      - npm-network
+
+  db:
+    image: mysql:8.0
+    container_name: ovo-wpp-db
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE:-ovo_wpp}
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-root}
+      MYSQL_USER: ${DB_USERNAME:-laravel}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-laravel}
+    volumes:
+      - db-data:/var/lib/mysql
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+  npm-network:
+    name: nginx-proxy-manager_default
+    external: true
+
+volumes:
+  db-data:
