@@ -14,10 +14,20 @@
                     <p class="text contact__mobile"></p>
                 </div>
             </div>
+            <div class="chat-box__item">
+                <select class="form--control select2 assign-agent" name="assignee_id" style="min-width: 150px;">
+                    <option value="">@lang('Unassigned')</option>
+                    @foreach($agents as $agent)
+                        <option value="{{ $agent->id }}">
+                            {{ $agent->fullname }}
+                        </option>
+                    @endforeach
+                </select>
+            </div>
         </div>
         <div>
-            <span class="template_button" data-bs-toggle="tooltip" data-bs-placement="top" title="@lang('Send message template')"><i
-                    class="las la-envelope-square"></i></span>
+            <span class="template_button" data-bs-toggle="tooltip" data-bs-placement="top"
+                title="@lang('Send message template')"><i class="las la-envelope-square"></i></span>
         </div>
     </div>
     <div class="msg-body">
@@ -69,7 +79,7 @@
                                 <i class="fas fa-file-alt"></i>
                             </span>
                             <span class="title">@lang('Document')</span>
-                            <input hidden class="media-input" name="document" type="file"accept="application/pdf">
+                            <input hidden class="media-input" name="document" type="file" accept="application/pdf">
                         </label>
                         <label for="video" class="media-item media_selector"
                             data-media-type="{{ Status::VIDEO_TYPE_MESSAGE }}">
@@ -85,12 +95,17 @@
                             </span>
                             <span class="title">@lang('Location')</span>
                         </label>
+                        <label class="media-item payment-modal-btn">
+                            <span class="icon">
+                                <i class="fa-solid fa-credit-card"></i>
+                            </span>
+                            <span class="title">@lang('Request Payment')</span>
+                        </label>
                     </div>
                     <div class="chat-url__list">
                         @forelse ($ctaUrls as $url)
-                            <label class="url-item select-url" data-id="{{ @$url->id }}"
-                                data-name="{{ @$url->name }}" data-bs-toggle="tooltip"
-                                data-bs-title="{{ @$url->cta_url }}">
+                            <label class="url-item select-url" data-id="{{ @$url->id }}" data-name="{{ @$url->name }}"
+                                data-bs-toggle="tooltip" data-bs-title="{{ @$url->cta_url }}">
                                 <span class="icon">
                                     <i class="fa-solid fa-paperclip"></i>
                                 </span>
@@ -107,9 +122,8 @@
                     </div>
                     <div class="chat-list__wrapper">
                         @forelse ($interactiveLists as $list)
-                            <label class="url-item select-list" data-id="{{ @$list->id }}"
-                                data-name="{{ @$list->name }}" data-bs-toggle="tooltip"
-                                data-bs-title="{{ @$list->button_text }}">
+                            <label class="url-item select-list" data-id="{{ @$list->id }}" data-name="{{ @$list->name }}"
+                                data-bs-toggle="tooltip" data-bs-title="{{ @$list->button_text }}">
                                 <span class="icon">
                                     <i class="fa-solid fa-list"></i>
                                 </span>
@@ -139,11 +153,11 @@
                 </span>
                 <div class="emoji-container"></div>
                 <div class="input-group">
-                    <textarea name="message" class="form--control message-input" placeholder="@lang('Type your message here')" autocomplete="off"></textarea>
+                    <textarea name="message" class="form--control message-input"
+                        placeholder="@lang('Type your message here')" autocomplete="off"></textarea>
                 </div>
                 <button class="chating-btn" type="submit">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
-                        fill="none">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
                         <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" stroke-width="1.5"
                             stroke-linecap="round" stroke-linejoin="round"></path>
                         <path d="M22 2L11 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"

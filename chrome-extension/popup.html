@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            width: 320px;
+            font-family: 'Segoe UI', Tahoma, sans-serif;
+            background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            font-size: 18px;
+            margin-bottom: 5px;
+        }
+
+        .header p {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-extract {
+            background: white;
+            color: #128C7E;
+            margin-bottom: 10px;
+        }
+
+        .btn-extract:hover {
+            transform: scale(1.02);
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn-extract:disabled {
+            background: #ccc;
+            color: #666;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        #status {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 13px;
+            margin-top: 15px;
+            min-height: 40px;
+        }
+
+        .instructions {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+
+        .instructions p {
+            color: white;
+            font-size: 11px;
+            margin-bottom: 5px;
+        }
+
+        .instructions ol {
+            color: white;
+            font-size: 11px;
+            padding-left: 18px;
+        }
+
+        .instructions li {
+            margin-bottom: 3px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <h1>📱 WhatsApp Extractor</h1>
+        <p>Extract group contacts instantly</p>
+    </div>
+
+    <button class="btn btn-extract" id="extractBtn">
+        🚀 Extract Contacts Now
+    </button>
+
+    <div id="status">Ready. Open a WhatsApp group first.</div>
+
+    <div class="instructions">
+        <p><strong>How to use:</strong></p>
+        <ol>
+            <li>Open web.whatsapp.com</li>
+            <li>Open a group chat</li>
+            <li>Click the group name to open info</li>
+            <li>Click "Extract Contacts Now"</li>
+            <li>Paste in your CRM!</li>
+        </ol>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+
+</html>

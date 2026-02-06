@@ -26,49 +26,54 @@ trait InboxManager
 {
     public function list()
     {
-        $user            = getParentUser();
-        $contactId       = request()->contact_id;
-        $conversationId  = request()->conversation ?? 0;
+        $user = getParentUser();
+        $contactId = request()->contact_id;
+        $conversationId = request()->conversation ?? 0;
         $whatsappAccount = getWhatsappAccount($user);
         if ($contactId && $whatsappAccount) {
             $conversation = Conversation::where('user_id', $user->id)->where('contact_id', $contactId)->where('whatsapp_account_id', $whatsappAccount->id)->first();
             if (!$conversation) {
-                $conversation                      = new Conversation();
-                $conversation->user_id             = $user->id;
-                $conversation->contact_id          = $contactId;
+                $conversation = new Conversation();
+                $conversation->user_id = $user->id;
+                $conversation->contact_id = $contactId;
                 $conversation->whatsapp_account_id = $whatsappAccount->id;
                 $conversation->save();
             }
             $conversationId = $conversation->id;
         }
 
-        $templates  =  Template::where('user_id', $user->id)->approved()->orderBy('id', 'desc')->get();
+        $templates = Template::where('user_id', $user->id)->approved()->orderBy('id', 'desc')->get();
 
         $pageTitle = "Manage Inbox";
-        $view      = 'Template::user.inbox.whatsapp_account_empty';
+        $view = 'Template::user.inbox.whatsapp_account_empty';
 
         if ($whatsappAccount) {
             $view = 'Template::user.inbox.list';
         }
 
         $ctaUrls = CtaUrl::where('user_id', $user->id)->get();
-        $interactiveLists = InteractiveList::where('user_id',$user->id)->get();
+        $interactiveLists = InteractiveList::where('user_id', $user->id)->get();
+
+        $agents = \App\Models\User::where('id', $user->id)
+            ->orWhere('parent_id', $user->id)
+            ->get(['id', 'firstname', 'lastname']);
 
         return responseManager("inbox", $pageTitle, "success", [
-            'view'              => $view,
-            'pageTitle'         => $pageTitle,
-            'conversationId'    => @$conversationId,
-            'conversation'      => @$conversation,
-            'whatsappAccount'   => @$whatsappAccount,
-            'ctaUrls'           => $ctaUrls,
-            'interactiveLists'  => $interactiveLists,
-            'templates'         => $templates
+            'view' => $view,
+            'pageTitle' => $pageTitle,
+            'conversationId' => @$conversationId,
+            'conversation' => @$conversation,
+            'whatsappAccount' => @$whatsappAccount,
+            'ctaUrls' => $ctaUrls,
+            'interactiveLists' => $interactiveLists,
+            'templates' => $templates,
+            'agents' => $agents
         ]);
     }
 
     public function conversationList(Request $request)
     {
-        $user  = getParentUser();
+        $user = getParentUser();
         $query = Conversation::where('user_id', $user->id)
             ->whereHas('contact')
             ->searchable(['contact:firstname,lastname,mobile'])
@@ -77,24 +82,32 @@ trait InboxManager
             ->withCount('unseenMessages as unseen_messages')
             ->orderBy('last_message_at', 'desc');
 
+        if ($request->filter) {
+            if ($request->filter == 'mine') {
+                $query->where('assignee_id', auth()->id());
+            } elseif ($request->filter == 'unassigned') {
+                $query->whereNull('assignee_id');
+            }
+        }
+
         if ($request->status && $request->status != 0) {
-            if($request->status == Status::UNREAD_CONVERSATION) {
+            if ($request->status == Status::UNREAD_CONVERSATION) {
                 $query->whereHas('unseenMessages');
-            }else {
+            } else {
                 $query->where('status', $request->status);
             }
         }
 
-        $conversations    = $query->apiQuery();
-        $html             = null;
+        $conversations = $query->apiQuery();
+        $html = null;
         $conversationList = null;
 
         if (isApiRequest()) {
             $conversationList = $conversations;
         } else {
             $activeConversationId = request()->conversation_id ?? 0;
-            $html                 = view('Template::user.inbox.conversation_list', compact('conversations', 'activeConversationId'))->render();
-            $conversationList     = $conversations;
+            $html = view('Template::user.inbox.conversation_list', compact('conversations', 'activeConversationId'))->render();
+            $conversationList = $conversations;
         }
 
         $notify[] = "Chat list";
@@ -104,16 +117,16 @@ trait InboxManager
             $notify,
             [
                 'conversations' => $conversationList,
-                'html'          => $html,
-                'profilePath'   => getFilePath('contactProfile'),
-                'more'          => $conversations->hasMorePages()
+                'html' => $html,
+                'profilePath' => getFilePath('contactProfile'),
+                'more' => $conversations->hasMorePages()
             ]
         );
     }
 
     public function conversationMessages($conversationId)
     {
-        $user         = getParentUser();
+        $user = getParentUser();
         $conversation = Conversation::where('user_id', $user->id)->with('contact')->find($conversationId);
 
         if (!$conversation) {
@@ -124,13 +137,14 @@ trait InboxManager
         $messageQuery = Message::where('conversation_id', $conversationId)
             ->searchable(['message']);
 
-        $messages         = $messageQuery->orderBy('ordering', 'desc')->paginate();
-        $html             = null;
+        $messages = $messageQuery->orderBy('ordering', 'desc')->paginate();
+        $html = null;
         $conversationList = null;
 
         if (!isApiRequest()) {
             $html = view('Template::user.inbox.messages', compact('messages'))->render();
-        };
+        }
+        ;
 
         $notify[] = "Chat messages";
 
@@ -139,12 +153,13 @@ trait InboxManager
             "success",
             $notify,
             [
-                'messages'            => $messages,
-                'contact'             => $conversation->contact,
-                'profilePath'         => getFilePath('contactProfile'),
-                'mediaBasePath'       => getFilePath('conversation'),
-                'html'                => $html,
-                'more'                => $messages->hasMorePages(),
+                'messages' => $messages,
+                'conversation' => $conversation,
+                'contact' => $conversation->contact,
+                'profilePath' => getFilePath('contactProfile'),
+                'mediaBasePath' => getFilePath('conversation'),
+                'html' => $html,
+                'more' => $messages->hasMorePages(),
                 'whatsapp_account_id' => @$user->currentWhatsapp()?->id
             ]
         );
@@ -152,12 +167,12 @@ trait InboxManager
 
     public function updateMessageStatus($id)
     {
-        $user          = getParentUser();
-        $conversation  = Conversation::where('user_id', $user->id)->find($id);
+        $user = getParentUser();
+        $conversation = Conversation::where('user_id', $user->id)->find($id);
         if (!$conversation) {
             return;
         }
-        $whatsapp      = WhatsappAccount::where('user_id', $user->id)->where('id', $conversation->whatsapp_account_id)->first();
+        $whatsapp = WhatsappAccount::where('user_id', $user->id)->where('id', $conversation->whatsapp_account_id)->first();
 
         if (!$whatsapp) {
             return;
@@ -174,9 +189,9 @@ trait InboxManager
 
             $requestData = [
                 'messaging_product' => 'whatsapp',
-                'status'            => 'read',
-                'message_id'        => $message->whatsapp_message_id,
-                'typing_indicator'  => [
+                'status' => 'read',
+                'message_id' => $message->whatsapp_message_id,
+                'typing_indicator' => [
                     'type' => 'text'
                 ]
             ];
@@ -211,12 +226,13 @@ trait InboxManager
             'status' => ['nullable', "integer", Rule::in([Status::DONE_CONVERSATION, Status::PENDING_CONVERSATION, Status::IMPORTANT_CONVERSATION, 0])]
         ]);
 
-        $user         = getParentUser();
+        $user = getParentUser();
         $conversation = Conversation::where('user_id', $user->id)->find($conversationId);
 
         if (!$conversation) {
             return apiResponse("not_found", "error", ["Conversation not found"]);
-        };
+        }
+        ;
 
         $conversation->status = $request->status ?? 0;
         $conversation->save();
@@ -226,17 +242,18 @@ trait InboxManager
 
     public function contactDetails($conversationId)
     {
-        $user         = getParentUser();
+        $user = getParentUser();
         $conversation = Conversation::where('user_id', $user->id)->with(['contact', 'notes', 'contact.tags', 'contact.lists'])->find($conversationId);
 
         if (!$conversation) {
             $notify[] = 'Conversation not found';
             return apiResponse("conversation_details", "error", $notify);
-        };
+        }
+        ;
 
         $notify[] = 'Conversation details';
-        $html     = null;
-        $contact  = $conversation->contact;
+        $html = null;
+        $contact = $conversation->contact;
 
         if (!isApiRequest()) {
             $html = view('Template::user.inbox.contact_details', compact('conversation'))->render();
@@ -244,9 +261,9 @@ trait InboxManager
 
         return apiResponse("conversation_details", "success", $notify, [
             'conversation' => $conversation,
-            'profilePath'  => getFilePath('contactProfile'),
-            'html'         => $html,
-            'isBlocked'   => $contact->is_blocked
+            'profilePath' => getFilePath('contactProfile'),
+            'html' => $html,
+            'isBlocked' => $contact->is_blocked
         ]);
     }
 
@@ -254,13 +271,13 @@ trait InboxManager
     {
         $request->validate([
             'conversation_id' => 'required|exists:conversations,id',
-            'note'            => 'required|string|max:255',
+            'note' => 'required|string|max:255',
         ]);
 
-        $contactNote                  = new ContactNote();
+        $contactNote = new ContactNote();
         $contactNote->conversation_id = $request->conversation_id;
-        $contactNote->note            = $request->note;
-        $contactNote->user_id         = getParentUser()->id;
+        $contactNote->note = $request->note;
+        $contactNote->user_id = getParentUser()->id;
         $contactNote->save();
 
         $message = "Note saved successfully";
@@ -285,25 +302,25 @@ trait InboxManager
     public function sendMessage(Request $request)
     {
         $request->validate([
-            'message'             => 'required_without_all:image,document,video,audio,cta_url_id,latitude,longitude,interactive_list_id',
-            'conversation_id'     => 'required',
-            'image'               => ['nullable', 'image', 'mimes:jpg,jpeg,png', 'max:5120'],
-            'document'            => ['nullable', 'file', 'mimes:pdf,doc,docx', 'max:102400'],
-            'video'               => ['nullable', 'file', 'mimes:mp4', 'max:16384'],
-            'audio'               => 'nullable|file|max:16384',
-            'cta_url_id'          => 'nullable|int',
+            'message' => 'required_without_all:image,document,video,audio,cta_url_id,latitude,longitude,interactive_list_id',
+            'conversation_id' => 'required',
+            'image' => ['nullable', 'image', 'mimes:jpg,jpeg,png', 'max:5120'],
+            'document' => ['nullable', 'file', 'mimes:pdf,doc,docx', 'max:102400'],
+            'video' => ['nullable', 'file', 'mimes:mp4', 'max:16384'],
+            'audio' => 'nullable|file|max:16384',
+            'cta_url_id' => 'nullable|int',
             'interactive_list_id' => 'nullable|int',
-            'latitude'            => 'required_if:longitude,!=,0',
-            'longitude'           => 'required_if:latitude,!=,0',
+            'latitude' => 'required_if:longitude,!=,0',
+            'longitude' => 'required_if:latitude,!=,0',
         ], [
-            'conversation_id.required'     => 'Please select a conversation to send message.',
+            'conversation_id.required' => 'Please select a conversation to send message.',
             'message.required_without_all' => 'The message should not be empty.',
-            'logitude.required_if'         => 'The longitude field is required when latitude is not empty.',
+            'logitude.required_if' => 'The longitude field is required when latitude is not empty.',
         ]);
 
-        $ctaUrl           = null;
-        $interactiveList  = null;
-        $user         = getParentUser();
+        $ctaUrl = null;
+        $interactiveList = null;
+        $user = getParentUser();
         $conversation = Conversation::where('user_id', $user->id)->find($request->conversation_id);
 
         if (!$conversation) {
@@ -312,7 +329,7 @@ trait InboxManager
 
         $contact = $conversation->contact;
 
-        if($contact->is_blocked) {
+        if ($contact->is_blocked) {
             return apiResponse("not_found", "error", ["You cannot send or receive messages with this contact because they have been blocked."]);
         }
 
@@ -329,9 +346,9 @@ trait InboxManager
                 return apiResponse("not_found", "error", ["The interactive list is not found"]);
             }
         }
-        
+
         try {
-            $whatsappAccount  = getWhatsappAccount($user);
+            $whatsappAccount = getWhatsappAccount($user);
             if (!$whatsappAccount) {
                 return apiResponse("not_found", "error", ["The whatsapp account is not found"]);
             }
@@ -340,9 +357,9 @@ trait InboxManager
                 if (!featureAccessLimitCheck($user->interactive_message)) {
                     return apiResponse("not_found", "error", ["Your current plan does not support interactive messages. Please upgrade your plan."]);
                 }
-                if($ctaUrl) {
+                if ($ctaUrl) {
                     $messageSend = (new WhatsAppLib())->sendCtaUrlMessage($conversation->contact->mobileNumber, $whatsappAccount, $ctaUrl);
-                }else {
+                } else {
                     $messageSend = (new WhatsAppLib())->sendInteractiveListMessage($conversation->contact->mobileNumber, $whatsappAccount, $interactiveList);
                 }
             } else {
@@ -352,47 +369,48 @@ trait InboxManager
             extract($messageSend);
 
             $agentId = 0;
-            if (auth()->user()->is_agent) $agentId = auth()->id();
+            if (auth()->user()->is_agent)
+                $agentId = auth()->id();
 
             $type = getIntMessageType($messageType);
             $location = null;
-            if($type == Status::LOCATION_TYPE_MESSAGE && $request->latitude && $request->longitude) {
+            if ($type == Status::LOCATION_TYPE_MESSAGE && $request->latitude && $request->longitude) {
                 $location = [
-                    'latitude'  => $request->latitude,
+                    'latitude' => $request->latitude,
                     'longitude' => $request->longitude,
-                    'name'      => $request->name ?? "",
-                    'address'   => $request->address ?? "",
+                    'name' => $request->name ?? "",
+                    'address' => $request->address ?? "",
                 ];
             }
 
-            $message                      = new Message();
-            $message->user_id             = $user->id;
+            $message = new Message();
+            $message->user_id = $user->id;
             $message->whatsapp_account_id = $whatsappAccount->id;
             $message->whatsapp_message_id = $whatsAppMessage[0]['id'];
-            $message->conversation_id     = $conversation->id;
-            $message->cta_url_id          = $ctaUrlId ?? 0;
+            $message->conversation_id = $conversation->id;
+            $message->cta_url_id = $ctaUrlId ?? 0;
             $message->interactive_list_id = $interactiveListId ?? 0;
-            $message->type                = Status::MESSAGE_SENT;
-            $message->message             = $request->message;
-            $message->media_id            = $mediaId;
-            $message->message_type        = $type;
-            $message->location            = $location;
-            $message->media_caption       = $mediaCaption;
-            $message->media_filename      = $mediaFileName;
-            $message->media_url           = $mediaUrl;
-            $message->media_path          = $mediaPath;
-            $message->mime_type           = $mimeType;
-            $message->media_type          = $mediaType;
-            $message->agent_id            = $agentId;
-            $message->status              = Status::SENT;
-            $message->ordering            = Carbon::now();
+            $message->type = Status::MESSAGE_SENT;
+            $message->message = $request->message;
+            $message->media_id = $mediaId;
+            $message->message_type = $type;
+            $message->location = $location;
+            $message->media_caption = $mediaCaption;
+            $message->media_filename = $mediaFileName;
+            $message->media_url = $mediaUrl;
+            $message->media_path = $mediaPath;
+            $message->mime_type = $mimeType;
+            $message->media_type = $mediaType;
+            $message->agent_id = $agentId;
+            $message->status = Status::SENT;
+            $message->ordering = Carbon::now();
             $message->save();
 
             $conversation->last_message_at = Carbon::now();
             $conversation->needs_human_reply = Status::YES;
             $conversation->save();
 
-            $notify[] =  "Message sent successfully";
+            $notify[] = "Message sent successfully";
 
             if (!isApiRequest()) {
                 $lastMessageHtml = view("Template::user.inbox.conversation_last_message", compact('message'))->render();
@@ -406,7 +424,7 @@ trait InboxManager
                 'message' => $message
             ]);
         } catch (Exception $ex) {
-            $notify[] =  $ex->getMessage() ?? "Something went to wrong";
+            $notify[] = $ex->getMessage() ?? "Something went to wrong";
             return apiResponse("exception", "error", $notify);
         }
     }
@@ -415,7 +433,7 @@ trait InboxManager
     {
         $request->validate([
             'conversation_id' => 'required',
-            'template_id'     => 'required',
+            'template_id' => 'required',
         ]);
 
         $user = getParentUser();
@@ -425,10 +443,10 @@ trait InboxManager
         if (!$conversation) {
             return apiResponse("not_found", "error", ["The conversation is not found"]);
         }
-        
+
         $contact = $conversation->contact;
 
-        if($contact->is_blocked) {
+        if ($contact->is_blocked) {
             return apiResponse("not_found", "error", ["You cannot send or receive messages with this contact because they have been blocked."]);
         }
 
@@ -436,53 +454,54 @@ trait InboxManager
             return apiResponse("not_found", "error", ["The contact is not found"]);
         }
 
-        $template  =  Template::where('user_id', $user->id)->approved()->find($request->template_id);
+        $template = Template::where('user_id', $user->id)->approved()->find($request->template_id);
 
         if (!$template) {
             return apiResponse("not_found", "error", ["The template is not found"]);
         }
 
-        try{
-        $whatsappAccount = $user->currentWhatsapp();
+        try {
+            $whatsappAccount = $user->currentWhatsapp();
 
-        if (!$whatsappAccount) {
-            return apiResponse("not_found", "error", ["Please connect your whatsapp account first"]);
-        }
+            if (!$whatsappAccount) {
+                return apiResponse("not_found", "error", ["Please connect your whatsapp account first"]);
+            }
 
-        $messageSend = (new WhatsAppLib())->sendTemplateMessage($request,$whatsappAccount, $template,$contact);
+            $messageSend = (new WhatsAppLib())->sendTemplateMessage($request, $whatsappAccount, $template, $contact);
 
-        extract($messageSend);
+            extract($messageSend);
 
-        $agentId = 0;
-        if (auth()->user()->is_agent) $agentId = auth()->id();
+            $agentId = 0;
+            if (auth()->user()->is_agent)
+                $agentId = auth()->id();
 
-        $message                      = new Message();
-        $message->user_id             = $user->id;
-        $message->template_id         = $template->id;
-        $message->whatsapp_account_id = $whatsappAccount->id;
-        $message->whatsapp_message_id = $whatsAppMessage[0]['id'];
-        $message->conversation_id     = $conversation->id;
-        $message->type                = Status::MESSAGE_SENT;
-        $message->agent_id            = $agentId;
-        $message->status              = Status::SENT;
-        $message->ordering            = Carbon::now();
-        $message->save();
+            $message = new Message();
+            $message->user_id = $user->id;
+            $message->template_id = $template->id;
+            $message->whatsapp_account_id = $whatsappAccount->id;
+            $message->whatsapp_message_id = $whatsAppMessage[0]['id'];
+            $message->conversation_id = $conversation->id;
+            $message->type = Status::MESSAGE_SENT;
+            $message->agent_id = $agentId;
+            $message->status = Status::SENT;
+            $message->ordering = Carbon::now();
+            $message->save();
 
-        $conversation->last_message_at = Carbon::now();
-        $conversation->needs_human_reply = Status::YES;
-        $conversation->save();
+            $conversation->last_message_at = Carbon::now();
+            $conversation->needs_human_reply = Status::YES;
+            $conversation->save();
 
-        $notify[] =  "Message sent successfully";
+            $notify[] = "Message sent successfully";
 
-        $lastMessageHtml = view("Template::user.inbox.conversation_last_message", compact('message'))->render();
-        return apiResponse("success", "success", $notify, [
-            'conversationId' => $conversation->id,
-            'html' => view('Template::user.inbox.single_message', compact('message'))->render(),
-            'lastMessageHtml' => $lastMessageHtml
-        ]);
+            $lastMessageHtml = view("Template::user.inbox.conversation_last_message", compact('message'))->render();
+            return apiResponse("success", "success", $notify, [
+                'conversationId' => $conversation->id,
+                'html' => view('Template::user.inbox.single_message', compact('message'))->render(),
+                'lastMessageHtml' => $lastMessageHtml
+            ]);
 
-        }catch (Exception $ex) {
-            $notify[] =  $ex->getMessage() ?? "Something went to wrong";
+        } catch (Exception $ex) {
+            $notify[] = $ex->getMessage() ?? "Something went to wrong";
             return apiResponse("exception", "error", $notify);
         }
     }
@@ -493,17 +512,17 @@ trait InboxManager
             'message_id' => 'required',
         ]);
 
-        $user    = getParentUser();
+        $user = getParentUser();
 
         $message = Message::where('user_id', $user->id)->where('type', Status::SENT)->where('status', Status::FAILED)->find($request->message_id);
         if (!$message) {
             return apiResponse("message_not_found", "error", ["Message not found"]);
         }
 
-        $conversation  = $message->conversation;
+        $conversation = $message->conversation;
         $contact = $conversation->contact;
 
-        if($contact->is_blocked) {
+        if ($contact->is_blocked) {
             return apiResponse("not_found", "error", ["You cannot send or receive messages with this contact because they have been blocked."]);
         }
 
@@ -512,16 +531,17 @@ trait InboxManager
         }
 
         $agentId = 0;
-        if (auth()->user()->is_agent) $agentId = auth()->id();
+        if (auth()->user()->is_agent)
+            $agentId = auth()->id();
 
         try {
-            $whatsappAccount  = $user->currentWhatsapp();
+            $whatsappAccount = $user->currentWhatsapp();
             $messageResend = (new WhatsAppLib())->messageResend($message, $conversation->contact->mobileNumber, $whatsappAccount);
 
             $message->whatsapp_message_id = $messageResend['whatsAppMessage'][0]['id'];
-            $message->status              = Status::MESSAGE_SENT;
-            $message->ordering            = Carbon::now();
-            $message->agent_id            = $agentId;
+            $message->status = Status::MESSAGE_SENT;
+            $message->ordering = Carbon::now();
+            $message->agent_id = $agentId;
             $message->save();
 
             $conversation->needs_human_reply = Status::YES;
@@ -534,7 +554,7 @@ trait InboxManager
                 'html' => view('Template::user.inbox.single_message', compact('message'))->render()
             ]);
         } catch (Exception $ex) {
-            $notify[] =  $ex->getMessage() ?? "Something went to wrong";
+            $notify[] = $ex->getMessage() ?? "Something went to wrong";
             return apiResponse("exception", "error", $notify);
         }
     }
@@ -591,10 +611,10 @@ trait InboxManager
     public function generateAiMessage(Request $request)
     {
         $request->validate([
-            'message'         => 'required|string',
+            'message' => 'required|string',
         ], [
             'message.required' => 'Unable to generate response. Please try again.',
-            'message.string'   => 'The only type of message allowed is text.',
+            'message.string' => 'The only type of message allowed is text.',
         ]);
 
         $user = getParentUser();
@@ -608,7 +628,7 @@ trait InboxManager
             return responseManager('not_available', 'AI Assistant is currently disabled. Please try again.');
         }
 
-        $userAiSetting  = $user->aiSetting;
+        $userAiSetting = $user->aiSetting;
         if (!$userAiSetting || !$userAiSetting->status) {
             return responseManager('not_available', 'AI Assistant is disabled');
         }
@@ -621,8 +641,8 @@ trait InboxManager
         $aiAssistantClass = $provider[$activeProvider->provider];
 
         $aiAssistant = new $aiAssistantClass();
-        $systemPrompt    = $userAiSetting->system_prompt;
-        $aiResponse      = $aiAssistant->getAiReply($systemPrompt, $request->message);
+        $systemPrompt = $userAiSetting->system_prompt;
+        $aiResponse = $aiAssistant->getAiReply($systemPrompt, $request->message);
 
         if ($aiResponse['success'] == true) {
             if ($aiResponse['response'] == null) {
@@ -640,10 +660,10 @@ trait InboxManager
     public function translateAiMessage(Request $request)
     {
         $request->validate([
-            'message'         => 'required|string',
+            'message' => 'required|string',
         ], [
             'message.required' => 'Unable to generate response. Please try again.',
-            'message.string'   => 'The only type of message allowed is text.',
+            'message.string' => 'The only type of message allowed is text.',
         ]);
 
         $user = getParentUser();
@@ -657,7 +677,7 @@ trait InboxManager
             return responseManager('not_available', 'AI Assistant is currently disabled. Please try again.');
         }
 
-        $userAiSetting  = $user->aiSetting;
+        $userAiSetting = $user->aiSetting;
         if (!$userAiSetting || !$userAiSetting->status) {
             return responseManager('not_available', 'AI Assistant is disabled');
         }
@@ -670,7 +690,7 @@ trait InboxManager
         $aiAssistantClass = $provider[$activeProvider->provider];
 
         $aiAssistant = new $aiAssistantClass();
-        $aiResponse      = $aiAssistant->getTranslatedText($request->message);
+        $aiResponse = $aiAssistant->getTranslatedText($request->message);
 
 
         if ($aiResponse['success'] == true) {
@@ -684,5 +704,36 @@ trait InboxManager
         } else {
             return responseManager('error', 'Unable to generate AI response. Please try again.');
         }
+    }
+    public function assignConversation(Request $request, $conversationId)
+    {
+        $request->validate([
+            'assignee_id' => 'nullable|exists:users,id',
+        ]);
+
+        $user = getParentUser();
+        $conversation = Conversation::where('user_id', $user->id)->find($conversationId);
+
+        if (!$conversation) {
+            return apiResponse("not_found", "error", ["Conversation not found"]);
+        }
+
+        // Validate that assignee belongs to the same parent (is the parent or a sibling agent)
+        if ($request->assignee_id) {
+            $assignee = \App\Models\User::where('id', $request->assignee_id)
+                ->where(function ($q) use ($user) {
+                    $q->where('id', $user->id)
+                        ->orWhere('parent_id', $user->id);
+                })->first();
+
+            if (!$assignee) {
+                return apiResponse("error", "error", ["Invalid agent selected"]);
+            }
+        }
+
+        $conversation->assignee_id = $request->assignee_id;
+        $conversation->save();
+
+        return apiResponse("success", "success", ["Conversation assigned successfully"]);
     }
 }

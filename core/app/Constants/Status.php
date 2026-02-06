@@ -41,7 +41,7 @@ class Status
     const CUR_TEXT = 2;
     const CUR_SYM = 3;
 
-    const TEMPLATE_PENDING  = 0;
+    const TEMPLATE_PENDING = 0;
     const TEMPLATE_APPROVED = 1;
     const TEMPLATE_REJECTED = 2;
     const TEMPLATE_DISABLED = 3;
@@ -52,7 +52,7 @@ class Status
     const MONTHLY = 1;
     const YEARLY = 2;
 
-    const WALLET_PAYMENT  = 1;
+    const WALLET_PAYMENT = 1;
     const GATEWAY_PAYMENT = 2;
 
     const INVOICE_PAID = 1;
@@ -79,6 +79,11 @@ class Status
     const CAMPAIGN_SCHEDULED = 3;
     const CAMPAIGN_FAILED = 9;
 
+    // Added for Retargeting/Wizard compatibility
+    const CAMPAIGN_PENDING = 0;
+    const CAMPAIGN_QUEUED = 10;
+    const CAMPAIGN_PROCESSING = 11;
+
     const TEXT_TYPE_MESSAGE = 1;
     const IMAGE_TYPE_MESSAGE = 2;
     const VIDEO_TYPE_MESSAGE = 3;
@@ -88,6 +93,7 @@ class Status
     const BUTTON_TYPE_MESSAGE = 7;
     const LOCATION_TYPE_MESSAGE = 8;
     const LIST_TYPE_MESSAGE = 9;
+    const ORDER_TYPE_MESSAGE = 10;
     const REPLY_TYPE_MESSAGE = 0;
 
     const SENT = 1;
@@ -96,12 +102,12 @@ class Status
     const FAILED = 9;
     const SCHEDULED = 0;
 
-    const CAMPAIGN_MESSAGE_NOT_SENT   = 0;
-    const CAMPAIGN_MESSAGE_IS_SENT    = 2;
+    const CAMPAIGN_MESSAGE_NOT_SENT = 0;
+    const CAMPAIGN_MESSAGE_IS_SENT = 2;
     const CAMPAIGN_MESSAGE_IS_SUCCESS = 1;
-    const CAMPAIGN_MESSAGE_IS_FAILED  = 9;
+    const CAMPAIGN_MESSAGE_IS_FAILED = 9;
 
-    const SUPPER_ADMIN_ID     = 1;
+    const SUPPER_ADMIN_ID = 1;
     const SUPER_ADMIN_ROLE_ID = 1;
 
     const COUPON_TYPE_PERCENTAGE = 1;
@@ -116,21 +122,23 @@ class Status
 
     const FLOW_TRIGGER_NEW_MESSAGE = 1;
     const FLOW_TRIGGER_KEYWORD_MATCH = 2;
-    
-    const NODE_TYPE_TEXT     = 1;
-    const NODE_TYPE_IMAGE    = 2;
-    const NODE_TYPE_VIDEO    = 3;
-    const NODE_TYPE_AUDIO    = 4;
-    const NODE_TYPE_DOCUMENT = 5;
-    const NODE_TYPE_CTA_URL  = 6;
-    const NODE_TYPE_LOCATION = 7;
-    const NODE_TYPE_LIST     = 8;
-    const NODE_TYPE_BUTTON   = 9;
-    const NODE_TYPE_TEMPLATE = 10;
 
-    const NODE_MEDIA_IMAGE    = 1;
-    const NODE_MEDIA_VIDEO    = 2;
-    const NODE_MEDIA_AUDIO    = 3;
+    const NODE_TYPE_TEXT = 1;
+    const NODE_TYPE_IMAGE = 2;
+    const NODE_TYPE_VIDEO = 3;
+    const NODE_TYPE_AUDIO = 4;
+    const NODE_TYPE_DOCUMENT = 5;
+    const NODE_TYPE_CTA_URL = 6;
+    const NODE_TYPE_LOCATION = 7;
+    const NODE_TYPE_LIST = 8;
+    const NODE_TYPE_BUTTON = 9;
+    const NODE_TYPE_TEMPLATE = 10;
+    const NODE_TYPE_PRODUCT = 11;
+    const NODE_TYPE_MULTI_PRODUCT = 12;
+
+    const NODE_MEDIA_IMAGE = 1;
+    const NODE_MEDIA_VIDEO = 2;
+    const NODE_MEDIA_AUDIO = 3;
     const NODE_MEDIA_DOCUMENT = 4;
 
     const FLOW_STATE_WAITING = 0;

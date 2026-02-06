@@ -31,6 +31,25 @@ class ImportFileReader
     public $columns = [];
 
     /**
+     * Aliases for columns to support flexible mapping
+     * Format: ['db_column' => ['alias1', 'alias2']]
+     * @var array
+     */
+    public $aliases = [];
+
+    /**
+     * Map of DB column name => File column index (Fallback if no headers found)
+     * @var array
+     */
+    public $fallbackMap = [];
+
+    /**
+     * Map of DB column name => File column index
+     * @var array
+     */
+    public $headerMap = [];
+
+    /**
      * check the value exits on DB: table
      *
      * @var array
@@ -57,7 +76,7 @@ class ImportFileReader
      *
      * @var array
      */
-    public $fileSupportedExtension = ['csv', 'xlsx'];
+    public $fileSupportedExtension = ['csv', 'xlsx', 'xls', 'txt'];
 
 
     /**
@@ -86,7 +105,7 @@ class ImportFileReader
 
     public function __construct($file, $modelName = null)
     {
-        $this->file      = $file;
+        $this->file = $file;
         $this->modelName = $modelName;
     }
 
@@ -94,8 +113,8 @@ class ImportFileReader
     {
         $fileExtension = $this->file->getClientOriginalExtension();
 
-        if (!in_array($fileExtension, $this->fileSupportedExtension)) {
-            return $this->exceptionSet("File type not supported");
+        if (!in_array(strtolower($fileExtension), $this->fileSupportedExtension)) {
+            return $this->exceptionSet("File type not supported ($fileExtension)");
         }
         $spreadsheet = IOFactory::load($this->file);
 
@@ -104,61 +123,135 @@ class ImportFileReader
         });
 
         if (count($data) <= 0) {
-            return   $this->exceptionSet("File can not be empty");
+            return $this->exceptionSet("File can not be empty");
         }
 
-        $this->validateFileHeader(array_filter(@$data[0]));
+        // Re-index data to ensure 0-based sequential array keys after filtering
+        $data = array_values($data);
 
-        unset($data[0]);
-        foreach ($data as  $item) {
+        $headersFound = $this->validateFileHeader(array_filter(@$data[0]));
+
+        if ($headersFound) {
+            unset($data[0]);
+        }
+
+        foreach ($data as $item) {
             $item = array_map('trim', $item);
             $this->dataReadFromFile($item);
-        };
+        }
+        ;
 
         return $this->saveData();
     }
 
     public function validateFileHeader($fileHeader)
     {
-        if (!is_array($fileHeader) || count($fileHeader) != count($this->columns)) {
-            $this->exceptionSet("Invalid file format");
+        // 1. Normalize file headers: trim, lowercase
+        $normalizedHeaders = [];
+        foreach ($fileHeader as $index => $header) {
+            $normalizedHeaders[$index] = strtolower(trim($header));
         }
-        foreach ($fileHeader as $k => $header) {
-            if (trim(strtolower($header)) != strtolower(@$this->columns[$k])) {
-                $this->exceptionSet("Invalid file format");
+
+        $this->headerMap = [];
+        $foundColumns = 0;
+
+        // 2. Map required columns to file indices
+        foreach ($this->columns as $dbCol) {
+            $dbColLower = strtolower($dbCol);
+            $mapped = false;
+
+            // Strategy A: Exact Match
+            $index = array_search($dbColLower, $normalizedHeaders);
+            if ($index !== false) {
+                $this->headerMap[$dbCol] = $index;
+                $mapped = true;
+            } else {
+                // Strategy B: Alias Match
+                if (isset($this->aliases[$dbCol]) && is_array($this->aliases[$dbCol])) {
+                    foreach ($this->aliases[$dbCol] as $alias) {
+                        $aliasLower = strtolower($alias);
+                        $index = array_search($aliasLower, $normalizedHeaders);
+                        if ($index !== false) {
+                            $this->headerMap[$dbCol] = $index;
+                            $mapped = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if ($mapped) {
+                $foundColumns++;
             }
         }
+
+        // If columns found, return true (Headers Exist)
+        if ($foundColumns > 0) {
+            return true;
+        }
+
+        // 3. Fallback: If no headers found, check if we have a fallback map
+        if (!empty($this->fallbackMap)) {
+            $this->headerMap = $this->fallbackMap;
+            return false; // False means "No Headers Found" (so don't skip first row)
+        }
+
+        $this->exceptionSet("No valid columns found in header. Expected: " . implode(', ', $this->columns));
+        return false;
     }
 
     public function dataReadFromFile($data)
     {
-        if (gettype($data) != 'array') {
-            return $this->exceptionSet('Invalid data formate provided inside upload file.');
+        if (!is_array($data)) {
+            return; // Skip invalid rows
         }
 
-        $data = array_map(fn($value) => trim((string) $value), $data);
+        $mappedData = [];
+        $hasData = false;
 
-        $data = array_slice($data, 0, count($this->columns));
-
-        if (count($data) != count($this->columns)) {
-            return  $this->exceptionSet('Invalid data formate provided inside upload file.');
+        foreach ($this->columns as $dbCol) {
+            if (isset($this->headerMap[$dbCol])) {
+                $index = $this->headerMap[$dbCol];
+                $val = isset($data[$index]) ? trim((string) $data[$index]) : '';
+                $mappedData[] = $val;
+                if ($val !== '')
+                    $hasData = true;
+            } else {
+                $mappedData[] = ''; // Default empty if column missing
+            }
         }
 
-        if ($this->dataInsertMode && (!$this->uniqueColumCheck($data))) {
-            $this->allUniqueData[] = array_combine($this->columns, $data);
+        if (!$hasData)
+            return; // Skip empty rows
+
+        if ($this->dataInsertMode && (!$this->uniqueColumCheck($mappedData))) {
+            // We need to re-combine with keys for standard processing if needed,
+            // but uniqueColumCheck usually expects indexed array matching $this->columns order
+            $this->allUniqueData[] = array_combine($this->columns, $mappedData);
         }
 
-        $this->allData[] = $data;
+        $this->allData[] = $mappedData;
     }
 
     function uniqueColumCheck($data)
     {
         $user = getParentUser();
-        $dialCodeValue = $data[2] ?? null;
-        $mobileValue   = $data[3] ?? null;
+
+        // data is indexed [0=>firstname, 1=>lastname, 2=>code, 3=>mobile] based on $this->columns order in ContactManager
+
+        // Dynamic check: find index of 'mobile_code' and 'mobile' in $this->columns
+        $codeIdx = array_search('mobile_code', $this->columns);
+        $mobileIdx = array_search('mobile', $this->columns);
+
+        $dialCodeValue = ($codeIdx !== false) ? ($data[$codeIdx] ?? null) : null;
+        $mobileValue = ($mobileIdx !== false) ? ($data[$mobileIdx] ?? null) : null;
 
         if ($mobileValue) {
-            return $this->modelName::where('user_id', $user->id)->where('mobile_code', $dialCodeValue)->where('mobile', $mobileValue)->exists();
+            $query = $this->modelName::where('user_id', $user->id)->where('mobile', $mobileValue);
+            if ($dialCodeValue) {
+                $query->where('mobile_code', $dialCodeValue);
+            }
+            return $query->exists();
         }
 
         return false;
@@ -175,7 +268,7 @@ class ImportFileReader
         if (count($this->allUniqueData) > 0 && $this->dataInsertMode) {
             try {
                 $this->allUniqueData = array_map(function ($data) use ($user) {
-                    $data['user_id']    = $user->id;
+                    $data['user_id'] = $user->id;
                     $data['created_at'] = Carbon::now();
                     $data['updated_at'] = Carbon::now();
                     return $data;
@@ -207,7 +300,9 @@ class ImportFileReader
                 decrementFeature($user, 'contact_limit', count($this->allUniqueData));
 
             } catch (Exception $e) {
-                $this->exceptionSet('This file can\'t be uploaded. It may contains duplicate data.');
+                // Log exception for debugging but return generalized message
+                // Log::error($e->getMessage());
+                $this->exceptionSet('This file can\'t be uploaded. It may contains duplicate data or invalid format.');
             }
         }
 

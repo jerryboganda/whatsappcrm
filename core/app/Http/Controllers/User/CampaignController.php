@@ -13,12 +13,13 @@ use App\Models\WhatsappAccount;
 use Carbon\Carbon;
 use Exception;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 
 class CampaignController extends Controller
 {
     public function index()
     {
-        $user      = getParentUser();
+        $user = getParentUser();
         $pageTitle = "Manage Campaign";
         $baseQuery = Campaign::where('user_id', $user->id)->where('whatsapp_account_id', getWhatsappAccountId($user))->with('template')->searchable(['title'])->filter(['status'])->orderBy('id', 'desc');
         if (request()->export) {
@@ -30,28 +31,41 @@ class CampaignController extends Controller
 
     public function createCampaign()
     {
-        $user             = getParentUser();
-        $pageTitle        = "New Campaign";
-        $contactLists     = ContactList::where('user_id', $user->id)->with('contact')->orderBy('name', 'asc')->get();
-        $contactTags      = ContactTag::where('user_id', $user->id)->with('contacts')->orderBy('name', 'asc')->get();
-        $templates        = Template::where('user_id', $user->id)->approved()->orderBy('id', 'desc')->get();
+        $user = getParentUser();
+        $pageTitle = "New Campaign";
+        $contactLists = ContactList::where('user_id', $user->id)->with('contact')->orderBy('name', 'asc')->get();
+        $contactTags = ContactTag::where('user_id', $user->id)->with('contacts')->orderBy('name', 'asc')->get();
+        $templates = Template::where('user_id', $user->id)->approved()->orderBy('id', 'desc')->get();
         $whatsappAccounts = WhatsappAccount::where('user_id', $user->id)->with('templates')->get();
 
         return view('Template::user.campaign.create', compact('pageTitle', 'contactLists', 'templates', 'whatsappAccounts', 'contactTags'));
     }
 
+    public function createWizard()
+    {
+        $user = getParentUser();
+        $pageTitle = "Broadcast Wizard";
+        $contactLists = ContactList::where('user_id', $user->id)->with('contact')->orderBy('name', 'asc')->get();
+        $contactTags = ContactTag::where('user_id', $user->id)->with('contacts')->orderBy('name', 'asc')->get();
+        $templates = Template::where('user_id', $user->id)->approved()->orderBy('id', 'desc')->get();
+        $whatsappAccounts = WhatsappAccount::where('user_id', $user->id)->with('templates')->get();
+
+        return view('Template::user.campaign.wizard', compact('pageTitle', 'contactLists', 'templates', 'whatsappAccounts', 'contactTags'));
+    }
+
     public function saveCampaign(Request $request)
     {
         $request->validate([
-            'title'               => 'required',
-            'contact_lists'       => 'required',
-            'template_id'         => 'required',
+            'title' => 'required',
+            'contact_lists' => 'required',
+            'template_id' => 'required',
             'whatsapp_account_id' => 'required',
-            'schedule'            => 'nullable|in:on,off',
-            'scheduled_at'        => 'required_if:schedule,on|date',
+            'schedule' => 'nullable|in:on,off',
+            'scheduled_at' => 'required_if:schedule,on|date',
+            'schedule_timezone' => 'nullable|timezone',
         ]);
 
-        $user            = getParentUser();
+        $user = getParentUser();
         $whatsappAccount = WhatsappAccount::where('user_id', $user->id)
             ->where('id', $request->whatsapp_account_id)
             ->with('templates')
@@ -66,7 +80,10 @@ class CampaignController extends Controller
         }
 
         if ($request->schedule == 'on') {
-            if (Carbon::parse($request->scheduled_at)->isPast()) {
+            $timezone = $request->schedule_timezone ?? config('app.timezone');
+            $scheduledTime = Carbon::parse($request->scheduled_at, $timezone);
+
+            if ($scheduledTime->isPast()) {
                 return responseManager('future_date_required', 'Scheduled date must be future date');
             }
         }
@@ -108,45 +125,82 @@ class CampaignController extends Controller
 
         $contactIds = [];
 
+        // Handle Raw Numbers Import
+        if ($request->raw_numbers) {
+            $rawNumbers = preg_split('/[\s,]+/', $request->raw_numbers, -1, PREG_SPLIT_NO_EMPTY);
+            $rawNumbers = array_unique($rawNumbers);
+
+            if (count($rawNumbers) > 0) {
+                // Create a temporary/auto list
+                $newList = new ContactList();
+                $newList->user_id = $user->id;
+                $newList->name = "Quick Import - " . now()->format('d M Y H:i');
+                $newList->status = Status::ENABLE;
+                $newList->save();
+
+                $newContactIds = [];
+                foreach ($rawNumbers as $number) {
+                    $number = preg_replace('/[^0-9]/', '', $number);
+                    if (empty($number))
+                        continue;
+
+                    $contact = \App\Models\Contact::firstOrCreate(
+                        ['user_id' => $user->id, 'mobile' => $number],
+                        ['name' => $number]
+                    );
+                    $newContactIds[] = $contact->id;
+                }
+
+                $newList->contact()->sync($newContactIds);
+
+                $lists = $request->contact_lists ?? [];
+                $lists[] = $newList->id;
+                $request->merge(['contact_lists' => $lists]);
+            }
+        }
+
         $contactIdsFromList = ContactList::where('user_id', getParentUser()->id)
             ->whereIn('id', $request->contact_lists ?? [])
             ->with('contact')
             ->get()
-            ->flatMap(fn($contactList) => $contactList->contact->where('is_blocked',Status::NO)->pluck('id'))
+            ->flatMap(fn($contactList) => $contactList->contact->where('is_blocked', Status::NO)->pluck('id'))
             ->toArray();
 
         $contactIdsFromTags = ContactTag::where('user_id', getParentUser()->id)
             ->whereIn('id', $request->contact_tags ?? [])
             ->with('contacts')
             ->get()
-            ->flatMap(fn($contactTag) => $contactTag->contacts->where('is_blocked',Status::NO)->pluck('id'))
+            ->flatMap(fn($contactTag) => $contactTag->contacts->where('is_blocked', Status::NO)->pluck('id'))
             ->toArray();
-        
+
         $contactIds = array_unique(array_merge($contactIdsFromList, $contactIdsFromTags)) ?? [];
-        
+
         if (empty($contactIds)) {
             return responseManager('contact_limit', 'At least one contact is required');
         }
 
         if ($request->schedule == 'on' && $request->scheduled_at) {
-            $status          = Status::CAMPAIGN_SCHEDULED;
-            $sendAt          = now()->parse($request->scheduled_at);
+            $status = Status::CAMPAIGN_SCHEDULED;
+            $timezone = $request->schedule_timezone ?? config('app.timezone');
+            // Convert user's selected time to App Timezone (UTC) for storage
+            $sendAt = Carbon::parse($request->scheduled_at, $timezone)->setTimezone(config('app.timezone'));
         } else {
-            $status          = Status::CAMPAIGN_RUNNING;
-            $sendAt          = now();
+            $status = Status::CAMPAIGN_RUNNING;
+            $sendAt = now();
         }
 
-        $campaign                         = new Campaign();
-        $campaign->title                  = $request->title;
-        $campaign->user_id                = $user->id;
-        $campaign->whatsapp_account_id    = $whatsappAccount->id;
-        $campaign->template_id            = $template->id;
+        $campaign = new Campaign();
+        $campaign->title = $request->title;
+        $campaign->user_id = $user->id;
+        $campaign->whatsapp_account_id = $whatsappAccount->id;
+        $campaign->template_id = $template->id;
         $campaign->template_header_params = $headerParams ?? [];
-        $campaign->template_body_params   = $bodyParams ?? [];
-        $campaign->et                     = Status::NO;
-        $campaign->status                 = $status;
-        $campaign->send_at                = $sendAt;
-        $campaign->total_message          = count($contactIds);
+        $campaign->template_body_params = $bodyParams ?? [];
+        $campaign->et = Status::NO;
+        $campaign->status = $status;
+        $campaign->send_at = $sendAt;
+        $campaign->schedule_timezone = $request->schedule_timezone;
+        $campaign->total_message = count($contactIds);
         $campaign->save();
 
         $campaign->contacts()->sync($contactIds);
@@ -160,14 +214,20 @@ class CampaignController extends Controller
 
     public function report($id)
     {
-        $user             = getParentUser();
-        $pageTitle        = "Campaign Report";
-        $campaign         = Campaign::where('id', $id)->where('user_id', $user->id)->firstOrFail();
-        $baseQuery        = CampaignContact::where('campaign_id', $campaign->id)->with('contact');
+        $user = getParentUser();
+        $pageTitle = "Campaign Report";
+        $campaign = Campaign::where('id', $id)->where('user_id', $user->id)->firstOrFail();
+        $baseQuery = CampaignContact::where('campaign_id', $campaign->id)->with('contact');
 
-        $widget['sending_ratio'] = $campaign->total_send / $campaign->total_message * 100;
-        $widget['success_ratio'] = $campaign->total_success / $campaign->total_message * 100;
-        $widget['fail_ratio']    = $campaign->total_failed / $campaign->total_message * 100;
+        if ($campaign->total_message > 0) {
+            $widget['sending_ratio'] = $campaign->total_send / $campaign->total_message * 100;
+            $widget['success_ratio'] = $campaign->total_success / $campaign->total_message * 100;
+            $widget['fail_ratio'] = $campaign->total_failed / $campaign->total_message * 100;
+        } else {
+            $widget['sending_ratio'] = 0;
+            $widget['success_ratio'] = 0;
+            $widget['fail_ratio'] = 0;
+        }
 
         if (request()->export) {
             if (request()->export == 'minimal') {
@@ -207,5 +267,72 @@ class CampaignController extends Controller
         fclose($file);
 
         return response()->download($filePath)->deleteFileAfterSend(true);
+    }
+
+    public function clickTrack(Request $request)
+    {
+        // c = campaign_id, u = contact_id, url = target link
+        $url = $request->url;
+
+        if ($request->c && $request->u) {
+            \App\Models\LinkLog::create([
+                'campaign_id' => $request->c,
+                'contact_id' => $request->u,
+                'url' => $url,
+                'ip_address' => getRealIP(),
+                'user_agent' => $request->header('User-Agent'),
+            ]);
+        }
+
+        return redirect()->to($url);
+    }
+
+    public function retarget($id, $status)
+    {
+        $user = getParentUser();
+        $campaign = Campaign::where('user_id', $user->id)->findOrFail($id);
+
+        $statusName = ucfirst($status);
+
+        if ($status === 'clicked') {
+            // Fetch contacts who clicked
+            $contactIds = \App\Models\LinkLog::where('campaign_id', $campaign->id)
+                ->distinct('contact_id')
+                ->pluck('contact_id')
+                ->toArray();
+        } else {
+            // Existing Logic
+            $query = CampaignContact::where('campaign_id', $campaign->id);
+            if ($status === 'failed') {
+                $query->where('status', Status::CAMPAIGN_FAILED);
+            } elseif ($status === 'pending') {
+                $query->whereIn('status', [Status::CAMPAIGN_INIT, Status::CAMPAIGN_QUEUED, Status::CAMPAIGN_PROCESSING]);
+            } elseif ($status === 'success') {
+                $query->where('status', Status::CAMPAIGN_COMPLETED);
+            } else {
+                $notify[] = ['error', 'Invalid retargeting status'];
+                return back()->withNotify($notify);
+            }
+            $contactIds = $query->pluck('contact_id')->toArray();
+        }
+
+        if (empty($contactIds)) {
+            $notify[] = ['error', "No contacts found with status: $statusName"];
+            return back()->withNotify($notify);
+        }
+
+        // Create New Contact List
+        $listName = "Retarget: " . Str::limit($campaign->title, 20) . " ($statusName) - " . now()->format('d M, Y H:i');
+        $listName = Str::limit($listName, 40, '');
+
+        $contactList = new ContactList();
+        $contactList->user_id = $user->id;
+        $contactList->name = $listName;
+        $contactList->save();
+
+        $contactList->contact()->sync($contactIds);
+
+        $notify[] = ['success', "Created list '$listName' with " . count($contactIds) . " contacts."];
+        return redirect()->route('user.campaign.create')->withNotify($notify);
     }
 }

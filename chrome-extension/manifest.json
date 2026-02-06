@@ -1,0 +1,27 @@
+{
+    "manifest_version": 3,
+    "name": "WhatsApp Group Contact Extractor",
+    "version": "1.0",
+    "description": "Extract contacts from WhatsApp groups with one click",
+    "permissions": [
+        "activeTab",
+        "clipboardWrite",
+        "scripting"
+    ],
+    "host_permissions": [
+        "https://web.whatsapp.com/*"
+    ],
+    "action": {
+        "default_popup": "popup.html",
+        "default_icon": {
+            "16": "icon16.png",
+            "48": "icon48.png",
+            "128": "icon128.png"
+        }
+    },
+    "icons": {
+        "16": "icon16.png",
+        "48": "icon48.png",
+        "128": "icon128.png"
+    }
+}

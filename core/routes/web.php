@@ -59,4 +59,5 @@ Route::controller('SiteController')->group(function () {
     Route::get('/', 'index')->name('home');
 
     Route::post('subscribe', 'subscribe')->name('subscribe');
+    Route::get('/ct', 'User\CampaignController@clickTrack')->name('campaign.click');
 });

@@ -15,9 +15,61 @@
                         </option>
                     </select>
                 </form>
+
+                <div class="dropdown ms-3">
+                    <button class="btn btn--base dropdown-toggle" type="button" data-bs-toggle="dropdown"
+                        aria-expanded="false">
+                        @lang('Retargeting Actions')
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li>
+                            <a class="dropdown-item"
+                                href="{{ route('user.campaign.retarget', [$campaign->id, 'failed']) }}">
+                                <i class="las la-exclamation-circle me-2"></i> @lang('Create List from Failed')
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item"
+                                href="{{ route('user.campaign.retarget', [$campaign->id, 'pending']) }}">
+                                <i class="las la-clock me-2"></i> @lang('Create List from Pending')
+                            </a>
+                        </li>
+                        <li>
+                            <hr class="dropdown-divider">
+                        </li>
+                        <li>
+                            <a class="dropdown-item"
+                                href="{{ route('user.campaign.retarget', [$campaign->id, 'success']) }}">
+                                <i class="las la-check-circle me-2"></i> @lang('Create List from Delivered')
+                            </a>
+                        <li>
+                            <a class="dropdown-item"
+                                href="{{ route('user.campaign.retarget', [$campaign->id, 'success']) }}">
+                                <i class="las la-check-circle me-2"></i> @lang('Create List from Delivered')
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item"
+                                href="{{ route('user.campaign.retarget', [$campaign->id, 'clicked']) }}">
+                                <i class="las la-mouse-pointer me-2"></i> @lang('Create List from Clickers')
+                            </a>
+                        </li>
+                    </ul>
+                </div>
             </div>
             <div class="report-top">
                 <div class="row gy-4 justify-content-center">
+                    <div class="col-xxl-3 col-sm-6">
+                        <div class="report-item">
+                            <h5 class="report-item__title">@lang('Total Clicks')</h5>
+                            <div class="report-item__bottom">
+                                <div class="text-wrapper">
+                                    <span
+                                        class="text text--primary">{{ $campaign->linkLogs()->distinct('contact_id')->count() }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                     <div class="col-xxl-3 col-sm-6">
                         <div class="report-item">
                             <h5 class="report-item__title">@lang('Total Messages')</h5>
@@ -126,10 +178,10 @@
 
 @push('script')
     <script>
-        (function($) {
+        (function ($) {
             "use strict";
 
-            $('.filter-form').find('select').on('change', function() {
+            $('.filter-form').find('select').on('change', function () {
                 $('.filter-form').submit();
             });
         })(jQuery);

@@ -19,20 +19,20 @@ class WhatsAppLib
 {
     public function sendInteractiveListMessage($toNumber, $whatsappAccount, $interactiveList)
     {
-        $phoneNumberId    = $whatsappAccount->phone_number_id;
-        $accessToken      = $whatsappAccount->access_token;
+        $phoneNumberId = $whatsappAccount->phone_number_id;
+        $accessToken = $whatsappAccount->access_token;
 
-        $url       = $this->getWhatsAppBaseUrl() . "{$phoneNumberId}/messages";
+        $url = $this->getWhatsAppBaseUrl() . "{$phoneNumberId}/messages";
 
         $data = [
             'messaging_product' => 'whatsapp',
-            'recipient_type'    => 'individual',
-            'to'                => $toNumber,
-            'type'              => 'interactive'
+            'recipient_type' => 'individual',
+            'to' => $toNumber,
+            'type' => 'interactive'
         ];
 
         $list = [
-            'type'  => 'list',
+            'type' => 'list',
         ];
 
         if (isset($interactiveList->header) && !empty($interactiveList->header)) {
@@ -73,16 +73,16 @@ class WhatsAppLib
             }
 
             return [
-                'whatsAppMessage'   => $responseData['messages'],
+                'whatsAppMessage' => $responseData['messages'],
                 'interactiveListId' => $interactiveList->id,
-                'mediaId'           => null,
-                'mediaUrl'          => null,
-                'mediaPath'         => null,
-                'mediaCaption'      => null,
-                'mediaFileName'     => null,
-                'messageType'       => 'list',
-                'mimeType'          => null,
-                'mediaType'         => null
+                'mediaId' => null,
+                'mediaUrl' => null,
+                'mediaPath' => null,
+                'mediaCaption' => null,
+                'mediaFileName' => null,
+                'messageType' => 'list',
+                'mimeType' => null,
+                'mediaType' => null
             ];
         } catch (Exception $ex) {
             throw new Exception($ex->getMessage());
@@ -91,36 +91,90 @@ class WhatsAppLib
 
     public function sendCtaUrlMessage($toNumber, $whatsappAccount, $ctaUrl)
     {
-        $phoneNumberId    = $whatsappAccount->phone_number_id;
-        $accessToken      = $whatsappAccount->access_token;
-
-        $url       = $this->getWhatsAppBaseUrl() . "{$phoneNumberId}/messages";
-
+        // ... (existing code for sendCtaUrlMessage) ...
+        // Keeping existing content, just ensuring context matches.
+        $phoneNumberId = $whatsappAccount->phone_number_id;
+        $accessToken = $whatsappAccount->access_token;
+        $url = $this->getWhatsAppBaseUrl() . "{$phoneNumberId}/messages";
         $data = [
             'messaging_product' => 'whatsapp',
-            'recipient_type'    => 'individual',
-            'to'                => $toNumber,
-            'type'              => 'interactive'
+            'recipient_type' => 'individual',
+            'to' => $toNumber,
+            'type' => 'interactive'
         ];
-
         $interactive = [
-            'type'  => 'cta_url',
+            'type' => 'cta_url',
             'header' => $ctaUrl->header,
-            'body'  => $ctaUrl->body,
+            'body' => $ctaUrl->body,
             'action' => $ctaUrl->action
         ];
-
         if (!empty($ctaUrl->footer) && count($ctaUrl->footer) > 0) {
             $interactive['footer'] = $ctaUrl->footer;
         }
-
         $data['interactive'] = $interactive;
-
         try {
-
             $response = Http::withHeaders([
                 'Authorization' => "Bearer {$accessToken}"
             ])->post($url, $data);
+            $responseData = $response->json();
+            if (!is_array($responseData) || !count($responseData)) {
+                throw new Exception("Something went wrong");
+            }
+            if (isset($responseData['error']) || !isset($responseData['messages'])) {
+                throw new Exception(@$responseData['error']['error_data']['details'] ?? @$responseData['error']['message'] ?? "Something went wrong");
+            }
+            if ($response->failed()) {
+                throw new Exception("Message sending failed");
+            }
+            return [
+                'whatsAppMessage' => $responseData['messages'],
+                'ctaUrlId' => $ctaUrl->id,
+                'mediaId' => null,
+                'mediaUrl' => null,
+                'mediaPath' => null,
+                'mediaCaption' => null,
+                'mediaFileName' => null,
+                'messageType' => 'url',
+                'mimeType' => null,
+                'mediaType' => null
+            ];
+        } catch (Exception $ex) {
+            throw new Exception($ex->getMessage());
+        }
+    }
+
+    public function sendProductMessage($toNumber, $whatsappAccount, $productData)
+    {
+        $phoneNumberId = $whatsappAccount->phone_number_id;
+        $accessToken = $whatsappAccount->access_token;
+        $url = $this->getWhatsAppBaseUrl() . "{$phoneNumberId}/messages";
+
+        $data = [
+            'messaging_product' => 'whatsapp',
+            'recipient_type' => 'individual',
+            'to' => $toNumber,
+            'type' => 'interactive',
+            'interactive' => [
+                'type' => 'product',
+                'body' => [
+                    'text' => $productData['body'] ?? ''
+                ],
+                'action' => [
+                    'catalog_id' => $productData['catalog_id'],
+                    'product_retailer_id' => $productData['product_retailer_id']
+                ]
+            ]
+        ];
+
+        if (!empty($productData['footer'])) {
+            $data['interactive']['footer'] = ['text' => $productData['footer']];
+        }
+
+        try {
+            $response = Http::withHeaders([
+                'Authorization' => "Bearer {$accessToken}"
+            ])->post($url, $data);
+
             $responseData = $response->json();
 
             if (!is_array($responseData) || !count($responseData)) {
@@ -128,34 +182,108 @@ class WhatsAppLib
             }
 
             if (isset($responseData['error']) || !isset($responseData['messages'])) {
-                throw new Exception(@$responseData['error']['error_data']['details'] ?? @$responseData['error']['message'] ?? "Something went wrong");
-            }
-
-            if ($response->failed()) {
-                throw new Exception("Message sending failed");
+                throw new Exception(@$responseData['error']['message'] ?? "Something went wrong");
             }
 
             return [
-                'whatsAppMessage' => $responseData['messages'],
-                'ctaUrlId'        => $ctaUrl->id,
-                'mediaId'         => null,
-                'mediaUrl'        => null,
-                'mediaPath'       => null,
-                'mediaCaption'    => null,
-                'mediaFileName'   => null,
-                'messageType'     => 'url',
-                'mimeType'        => null,
-                'mediaType'       => null
+                'whatsAppMessage' => $responseData['messages']
             ];
         } catch (Exception $ex) {
             throw new Exception($ex->getMessage());
         }
     }
 
-    public function sendTemplateMessage($request, $whatsappAccount, $template, $contact,$node = null)
+    public function sendMultiProductMessage($toNumber, $whatsappAccount, $productData)
     {
         $phoneNumberId = $whatsappAccount->phone_number_id;
-        $accessToken   = $whatsappAccount->access_token;
+        $accessToken = $whatsappAccount->access_token;
+        $url = $this->getWhatsAppBaseUrl() . "{$phoneNumberId}/messages";
+
+        $data = [
+            'messaging_product' => 'whatsapp',
+            'recipient_type' => 'individual',
+            'to' => $toNumber,
+            'type' => 'interactive',
+            'interactive' => [
+                'type' => 'product_list',
+                'header' => [
+                    'type' => 'text',
+                    'text' => $productData['header']
+                ],
+                'body' => [
+                    'text' => $productData['body']
+                ],
+                'action' => [
+                    'catalog_id' => $productData['catalog_id'],
+                    'sections' => $productData['sections']
+                ]
+            ]
+        ];
+
+        if (!empty($productData['footer'])) {
+            $data['interactive']['footer'] = ['text' => $productData['footer']];
+        }
+
+        try {
+            $response = Http::withHeaders([
+                'Authorization' => "Bearer {$accessToken}"
+            ])->post($url, $data);
+
+            $responseData = $response->json();
+
+            if (!is_array($responseData) || !count($responseData)) {
+                throw new Exception("Something went wrong");
+            }
+
+            if (isset($responseData['error']) || !isset($responseData['messages'])) {
+                throw new Exception(@$responseData['error']['message'] ?? "Something went wrong");
+            }
+
+            return [
+                'whatsAppMessage' => $responseData['messages']
+            ];
+        } catch (Exception $ex) {
+            throw new Exception($ex->getMessage());
+        }
+    }
+
+    public function updateCommerceSettings($whatsappAccount, $isCartEnabled, $isCatalogVisible)
+    {
+        $phoneNumberId = $whatsappAccount->phone_number_id;
+        $accessToken = $whatsappAccount->access_token;
+        $url = $this->getWhatsAppBaseUrl() . "{$phoneNumberId}/whatsapp_commerce_settings";
+
+        $data = [
+            'is_cart_enabled' => $isCartEnabled,
+            'is_catalog_visible' => $isCatalogVisible
+        ];
+
+        try {
+            $response = Http::withHeaders([
+                'Authorization' => "Bearer {$accessToken}"
+            ])->post($url, $data);
+
+            $responseData = $response->json();
+
+            if (!is_array($responseData)) {
+                throw new Exception("Something went wrong");
+            }
+
+            if (isset($responseData['error'])) {
+                throw new Exception(@$responseData['error']['message'] ?? "Something went wrong");
+            }
+
+            return $responseData['success'] ?? true;
+
+        } catch (Exception $ex) {
+            throw new Exception($ex->getMessage());
+        }
+    }
+
+    public function sendTemplateMessage($request, $whatsappAccount, $template, $contact, $node = null)
+    {
+        $phoneNumberId = $whatsappAccount->phone_number_id;
+        $accessToken = $whatsappAccount->access_token;
 
         $bodyParams = [];
         $headerParams = [];
@@ -173,17 +301,17 @@ class WhatsAppLib
                 'text' => $value ?? '',
             ];
         }
-        
-        if($node && !empty($node->header_params)){
+
+        if ($node && !empty($node->header_params)) {
             $headerParams = $node->header_params;
         }
 
-        if($node && !empty($node->body_params)){
+        if ($node && !empty($node->body_params)) {
             $bodyParams = $node->body_params;
         }
 
         $templateHeaderParams = parseTemplateParams($headerParams, $contact);
-        $templateBodyParams   = parseTemplateParams($bodyParams, $contact);
+        $templateBodyParams = parseTemplateParams($bodyParams, $contact);
 
         $components = [];
 
@@ -281,7 +409,7 @@ class WhatsAppLib
         ];
 
         try {
-            $url   = $this->getWhatsAppBaseUrl() . "{$phoneNumberId}/messages?access_token={$accessToken}";
+            $url = $this->getWhatsAppBaseUrl() . "{$phoneNumberId}/messages?access_token={$accessToken}";
 
             $response = Http::withHeaders([
                 'Authorization' => "Bearer {$whatsappAccount->access_token}",
@@ -304,77 +432,77 @@ class WhatsAppLib
     public function messageSend($request, $toNumber, $whatsappAccount)
     {
 
-        $phoneNumberId    = $whatsappAccount->phone_number_id;
-        $accessToken      = $whatsappAccount->access_token;
+        $phoneNumberId = $whatsappAccount->phone_number_id;
+        $accessToken = $whatsappAccount->access_token;
 
-        $url       = $this->getWhatsAppBaseUrl() . "{$phoneNumberId}/messages";
+        $url = $this->getWhatsAppBaseUrl() . "{$phoneNumberId}/messages";
         $mediaLink = $this->getWhatsAppBaseUrl() . "{$phoneNumberId}/media";
 
-        $mediaId       = null;
-        $mediaUrl      = null;
-        $mediaPath     = null;
-        $mediaCaption  = null;
+        $mediaId = null;
+        $mediaUrl = null;
+        $mediaPath = null;
+        $mediaCaption = null;
         $mediaFileName = null;
-        $mimeType      = null;
-        $mediaType     = null;
+        $mimeType = null;
+        $mediaType = null;
 
         $data = [
             'messaging_product' => 'whatsapp',
-            'recipient_type'    => 'individual',
-            'to'                => $toNumber,
+            'recipient_type' => 'individual',
+            'to' => $toNumber,
         ];
 
         if ($request->hasFile('image') || $request->get('image') instanceof UploadedFile) {
 
-            $file          = $request->file('image') ?: $request->get('image');
-            $mediaUpload   = $this->uploadMedia($mediaLink, $file, $accessToken);
+            $file = $request->file('image') ?: $request->get('image');
+            $mediaUpload = $this->uploadMedia($mediaLink, $file, $accessToken);
 
-            $mediaId       = $mediaUpload['id'];
-            $mediaCaption  = $request->message;
-            $data['type']  = 'image';
+            $mediaId = $mediaUpload['id'];
+            $mediaCaption = $request->message;
+            $data['type'] = 'image';
             $data['image'] = [
-                'id'      => $mediaId,
+                'id' => $mediaId,
                 'caption' => $mediaCaption
             ];
-            $mediaType     = 'image';
-            $mimeType      = mime_content_type($file->getPathname());
+            $mediaType = 'image';
+            $mimeType = mime_content_type($file->getPathname());
         } else if ($request->hasFile('document') || $request->get('document') instanceof UploadedFile) {
-            $file             = $request->file('document') ?: $request->get('document');
-            $mediaUpload      = $this->uploadMedia($mediaLink, $file, $accessToken);
-            $mediaId          = $mediaUpload['id'];
-            $mediaCaption     = $request->message;
-            $mediaFileName    = $request->file('document') ? $request->file('document')->getClientOriginalName() : basename($request->get('document'));
-            $data['type']     = 'document';
+            $file = $request->file('document') ?: $request->get('document');
+            $mediaUpload = $this->uploadMedia($mediaLink, $file, $accessToken);
+            $mediaId = $mediaUpload['id'];
+            $mediaCaption = $request->message;
+            $mediaFileName = $request->file('document') ? $request->file('document')->getClientOriginalName() : basename($request->get('document'));
+            $data['type'] = 'document';
             $data['document'] = [
-                'id'       => $mediaId,
-                'caption'  => $mediaCaption,
+                'id' => $mediaId,
+                'caption' => $mediaCaption,
                 'filename' => $mediaFileName
             ];
-            $mediaType        = 'document';
-            $mimeType         = mime_content_type($file->getPathname());
+            $mediaType = 'document';
+            $mimeType = mime_content_type($file->getPathname());
         } else if ($request->hasFile('video') || $request->get('video') instanceof UploadedFile) {
-            $file          = $request->file('video') ?: $request->get('video');
-            $mediaUpload   = $this->uploadMedia($mediaLink, $file, $accessToken);
-            $mediaId       = $mediaUpload['id'];
-            $mediaCaption  = $request->message;
-            $data['type']  = 'video';
+            $file = $request->file('video') ?: $request->get('video');
+            $mediaUpload = $this->uploadMedia($mediaLink, $file, $accessToken);
+            $mediaId = $mediaUpload['id'];
+            $mediaCaption = $request->message;
+            $data['type'] = 'video';
             $data['video'] = [
-                'id'      => $mediaId,
+                'id' => $mediaId,
                 'caption' => $mediaCaption
             ];
-            $mediaType     = 'video';
-            $mimeType      = mime_content_type($file->getPathname());
+            $mediaType = 'video';
+            $mimeType = mime_content_type($file->getPathname());
         } else if ($request->hasFile('audio') || $request->get('audio') instanceof UploadedFile) {
-            $file          = $request->file('audio') ?: $request->get('audio');
-            $mediaUpload   = $this->uploadMedia($mediaLink, $file, $accessToken);
-            $mediaId       = $mediaUpload['id'];
-            $mediaCaption  = $request->message;
-            $data['type']  = 'audio';
+            $file = $request->file('audio') ?: $request->get('audio');
+            $mediaUpload = $this->uploadMedia($mediaLink, $file, $accessToken);
+            $mediaId = $mediaUpload['id'];
+            $mediaCaption = $request->message;
+            $data['type'] = 'audio';
             $data['audio'] = [
-                'id'      => $mediaId
+                'id' => $mediaId
             ];
-            $mediaType     = 'audio';
-            $mimeType      = mime_content_type($file->getPathname());
+            $mediaType = 'audio';
+            $mimeType = mime_content_type($file->getPathname());
         } else if ($request->latitude && $request->longitude) {
             $data['type'] = 'location';
             $location = [
@@ -384,7 +512,8 @@ class WhatsAppLib
             if ($request->name != null && $request->address != null) {
                 $location['name'] = $request->name;
                 $location['address'] = $request->address;
-            };
+            }
+            ;
 
             $data['location'] = $location;
         } else {
@@ -423,16 +552,16 @@ class WhatsAppLib
 
             return [
                 'whatsAppMessage' => $responseData['messages'],
-                'ctaUrlId'        => 0,
-                'mediaId'         => $mediaId,
-                'mediaUrl'        => $mediaUrl,
-                'mediaPath'       => $mediaPath,
-                'mediaCaption'    => $mediaCaption,
-                'mediaFileName'   => $mediaFileName,
-                'messageType'     => $data['type'],
-                'mimeType'        => $mimeType ?? null,
-                'mediaType'       => $mediaType ?? null,
-                'location'        => $data['location'] ?? null
+                'ctaUrlId' => 0,
+                'mediaId' => $mediaId,
+                'mediaUrl' => $mediaUrl,
+                'mediaPath' => $mediaPath,
+                'mediaCaption' => $mediaCaption,
+                'mediaFileName' => $mediaFileName,
+                'messageType' => $data['type'],
+                'mimeType' => $mimeType ?? null,
+                'mediaType' => $mediaType ?? null,
+                'location' => $data['location'] ?? null
             ];
         } catch (Exception $ex) {
             throw new Exception($ex->getMessage());
@@ -441,10 +570,10 @@ class WhatsAppLib
 
     public function messageResend(object $message, $toNumber, $whatsappAccount)
     {
-        $phoneNumberId    = $whatsappAccount->phone_number_id;
-        $accessToken      = $whatsappAccount->access_token;
+        $phoneNumberId = $whatsappAccount->phone_number_id;
+        $accessToken = $whatsappAccount->access_token;
 
-        $url       = $this->getWhatsAppBaseUrl() . "{$phoneNumberId}/messages";
+        $url = $this->getWhatsAppBaseUrl() . "{$phoneNumberId}/messages";
 
         $mediaId = $message->media_id ?? null;
         $mediaCaption = $message->media_caption ?? null;
@@ -452,27 +581,27 @@ class WhatsAppLib
 
         $data = [
             'messaging_product' => 'whatsapp',
-            'to'                => $toNumber,
-            'type'              => 'text'
+            'to' => $toNumber,
+            'type' => 'text'
         ];
 
         if ($message->media_id && $message->message_type == Status::IMAGE_TYPE_MESSAGE) {
-            $data['type']  = 'image';
+            $data['type'] = 'image';
             $data['image'] = [
-                'id'      => $mediaId,
+                'id' => $mediaId,
                 'caption' => $mediaCaption
             ];
         } else if ($message->media_id && $message->message_type == Status::DOCUMENT_TYPE_MESSAGE) {
-            $data['type']     = 'document';
+            $data['type'] = 'document';
             $data['document'] = [
-                'id'       => $mediaId,
-                'caption'  => $mediaCaption,
+                'id' => $mediaId,
+                'caption' => $mediaCaption,
                 'filename' => $mediaFileName
             ];
         } else if ($message->media_id && $message->message_type == Status::VIDEO_TYPE_MESSAGE) {
-            $data['type']  = 'video';
+            $data['type'] = 'video';
             $data['video'] = [
-                'id'      => $mediaId,
+                'id' => $mediaId,
                 'caption' => $mediaCaption
             ];
         } else {
@@ -551,11 +680,11 @@ class WhatsAppLib
     {
         try {
 
-            $url      = "https://graph.facebook.com/v23.0/{$appId}/uploads";
+            $url = "https://graph.facebook.com/v23.0/{$appId}/uploads";
             $response = Http::post($url, [
-                'file_name'    => $fileData['name'],
-                'file_length'  => $fileData['size'],
-                'file_type'    => $fileData['type'],
+                'file_name' => $fileData['name'],
+                'file_length' => $fileData['size'],
+                'file_type' => $fileData['type'],
                 'access_token' => $accessToken
             ]);
             $data = $response->json();
@@ -573,12 +702,12 @@ class WhatsAppLib
         try {
 
             $cleanSessionId = str_replace('upload:', '', $sessionId);
-            $url            = "https://graph.facebook.com/v23.0/upload:$cleanSessionId";
-            $fileContents   = file_get_contents($filePath);
+            $url = "https://graph.facebook.com/v23.0/upload:$cleanSessionId";
+            $fileContents = file_get_contents($filePath);
 
             $response = Http::withHeaders([
                 'Authorization' => "OAuth $accessToken",
-                'file_offset'   => '0',
+                'file_offset' => '0',
             ])->withBody($fileContents, $mimeType)
                 ->post($url);
 
@@ -626,15 +755,15 @@ class WhatsAppLib
             }
 
             $fileContent = $response->body();
-            $mimeType    = $response->header('Content-Type');
+            $mimeType = $response->header('Content-Type');
 
             $fileExtension = explode('/', $mimeType)[1];
-            $fileName      = "{$mediaId}.{$fileExtension}";
+            $fileName = "{$mediaId}.{$fileExtension}";
 
             $parentFolder = getFilePath('conversation');
-            $subFolder    = "{$userId}/" . date('Y/m/d');
-            $folderPath   = $parentFolder . "/" . $subFolder;
-            $filePath     = $folderPath . "/" . $fileName;
+            $subFolder = "{$userId}/" . date('Y/m/d');
+            $folderPath = $parentFolder . "/" . $subFolder;
+            $filePath = $folderPath . "/" . $fileName;
 
             if (!file_exists($folderPath)) {
                 mkdir($folderPath, 0755, true);
@@ -648,7 +777,7 @@ class WhatsAppLib
         }
     }
 
-    public function  submitTemplate($businessAccountId, $accessToken, $templateData = [])
+    public function submitTemplate($businessAccountId, $accessToken, $templateData = [])
     {
         $header = [
             'Content-Type: application/json',
@@ -658,7 +787,7 @@ class WhatsAppLib
         try {
 
             $response = CurlRequest::curlPostContent($this->getWhatsAppBaseUrl() . "{$businessAccountId}/message_templates", $templateData, $header);
-            $data     = json_decode($response, true);
+            $data = json_decode($response, true);
 
             if (!is_array($data) || isset($data['error'])) {
                 throw new Exception(@$data['error']['error_user_msg'] ?? @$data['error']['message'] ?? "Something went wrong");
@@ -673,31 +802,35 @@ class WhatsAppLib
     {
         $this->checkConversationLastMessage($conversation);
 
-        $contact  = $conversation->contact;
+        $contact = $conversation->contact;
         $userAiSetting = $user->aiSetting;
 
-        if (!$userAiSetting) return;
+        if (!$userAiSetting)
+            return;
 
-        if ($userAiSetting->status == Status::DISABLE || !$contact || $conversation->needs_human_reply == Status::YES) return;
+        if ($userAiSetting->status == Status::DISABLE || !$contact || $conversation->needs_human_reply == Status::YES)
+            return;
 
         $provider = [
             'openai' => OpenAi::class,
             'gemini' => Gemini::class
         ];
 
-        $activeProvider   = AiAssistant::active()->first();
+        $activeProvider = AiAssistant::active()->first();
 
-        if (!$activeProvider) return;
+        if (!$activeProvider)
+            return;
 
-        if ($user->ai_assistance == 0) return;
+        if ($user->ai_assistance == 0)
+            return;
 
         $aiAssistantClass = $provider[$activeProvider->provider];
 
         $aiAssistant = new $aiAssistantClass();
 
         if ($userAiSetting->status == Status::ENABLE) {
-            $systemPrompt    = $userAiSetting->system_prompt;
-            $aiResponse      = $aiAssistant->getAiReply($systemPrompt, $message);
+            $systemPrompt = $userAiSetting->system_prompt;
+            $aiResponse = $aiAssistant->getAiReply($systemPrompt, $message);
             $whatsappAccount = $user->currentWhatsapp();
 
             if ($aiResponse['success'] == true) {
@@ -716,42 +849,43 @@ class WhatsAppLib
                 $messageSend = $this->messageSend($request, $contact->mobileNumber, $whatsappAccount);
                 extract($messageSend);
 
-                $message                      = new Message();
-                $message->user_id             = $user->id;
+                $message = new Message();
+                $message->user_id = $user->id;
                 $message->whatsapp_account_id = $whatsappAccount->id;
                 $message->whatsapp_message_id = $whatsAppMessage[0]['id'];
-                $message->conversation_id     = $conversation->id;
-                $message->type                = Status::MESSAGE_SENT;
-                $message->message             = $request->message;
-                $message->media_id            = $mediaId;
-                $message->message_type        = getIntMessageType($messageType);;
-                $message->media_caption       = $mediaCaption;
-                $message->media_filename      = $mediaFileName;
-                $message->media_url           = $mediaUrl;
-                $message->media_path          = $mediaPath;
-                $message->mime_type           = $mimeType;
-                $message->media_type          = $mediaType;
-                $message->status              = Status::MESSAGE_SENT;
-                $message->ordering            = Carbon::now();
-                $message->ai_reply            = Status::YES;
+                $message->conversation_id = $conversation->id;
+                $message->type = Status::MESSAGE_SENT;
+                $message->message = $request->message;
+                $message->media_id = $mediaId;
+                $message->message_type = getIntMessageType($messageType);
+                ;
+                $message->media_caption = $mediaCaption;
+                $message->media_filename = $mediaFileName;
+                $message->media_url = $mediaUrl;
+                $message->media_path = $mediaPath;
+                $message->mime_type = $mimeType;
+                $message->media_type = $mediaType;
+                $message->status = Status::MESSAGE_SENT;
+                $message->ordering = Carbon::now();
+                $message->ai_reply = Status::YES;
                 $message->save();
 
                 $conversation->last_message_at = Carbon::now();
                 $conversation->save();
 
-                $html                        = view('Template::user.inbox.single_message', compact('message'))->render();
+                $html = view('Template::user.inbox.single_message', compact('message'))->render();
                 $lastConversationMessageHtml = view("Template::user.inbox.conversation_last_message", compact('message'))->render();
 
                 event(new ReceiveMessage($whatsappAccount->id, [
-                    'html'            => $html,
-                    'message'         => $message,
-                    'newMessage'      => true,
-                    'newContact'      => false,
+                    'html' => $html,
+                    'message' => $message,
+                    'newMessage' => true,
+                    'newContact' => false,
                     'lastMessageHtml' => $lastConversationMessageHtml,
-                    'unseenMessage'   => $conversation->unseenMessages()->count() < 10 ? $conversation->unseenMessages()->count() : '9+',
-                    'lastMessageAt'   => showDateTime(Carbon::now()),
-                    'conversationId'  => $conversation->id,
-                    'mediaPath'       => getFilePath('conversation')
+                    'unseenMessage' => $conversation->unseenMessages()->count() < 10 ? $conversation->unseenMessages()->count() : '9+',
+                    'lastMessageAt' => showDateTime(Carbon::now()),
+                    'conversationId' => $conversation->id,
+                    'mediaPath' => getFilePath('conversation')
                 ]));
             }
         }
@@ -769,7 +903,7 @@ class WhatsAppLib
     public function userBlockAction($whatsappAccount, $contact, $action = 'block')
     {
         $phoneNumberId = $whatsappAccount->phone_number_id;
-        $accessToken   = $whatsappAccount->access_token;
+        $accessToken = $whatsappAccount->access_token;
         $url = $this->getWhatsAppBaseUrl() . "{$phoneNumberId}/block_users";
 
         $data = [
@@ -799,8 +933,8 @@ class WhatsAppLib
             if (!is_array($responseData) || $response->failed() || isset($responseData['error']) || !isset($responseData['block_users'])) {
                 throw new Exception(
                     @$responseData['error']['error_user_msg']
-                        ?? @$responseData['error']['message']
-                        ?? $message
+                    ?? @$responseData['error']['message']
+                    ?? $message
                 );
             }
 
@@ -813,21 +947,21 @@ class WhatsAppLib
     public function sendButtonMessage($toNumber, $whatsappAccount, $button)
     {
 
-        $phoneNumberId    = $whatsappAccount->phone_number_id;
-        $accessToken      = $whatsappAccount->access_token;
-        $url              = $this->getWhatsAppBaseUrl() . "{$phoneNumberId}/messages";
+        $phoneNumberId = $whatsappAccount->phone_number_id;
+        $accessToken = $whatsappAccount->access_token;
+        $url = $this->getWhatsAppBaseUrl() . "{$phoneNumberId}/messages";
 
         $data = [
             'messaging_product' => 'whatsapp',
-            'recipient_type'    => 'individual',
-            'to'                => $toNumber,
-            'type'              => 'interactive'
+            'recipient_type' => 'individual',
+            'to' => $toNumber,
+            'type' => 'interactive'
         ];
 
         $buttonData = json_decode($button->buttons_json, true);
 
         $interactive = [
-            'type'  => 'button'
+            'type' => 'button'
         ];
 
         $interactive['body'] = [
@@ -861,22 +995,22 @@ class WhatsAppLib
             if (!is_array($responseData) || $response->failed() || isset($responseData['error'])) {
                 throw new Exception(
                     @$responseData['error']['error_user_msg']
-                        ?? @$responseData['error']['message']
-                        ?? "Failed to send the message! Please try again later."
+                    ?? @$responseData['error']['message']
+                    ?? "Failed to send the message! Please try again later."
                 );
             }
 
             return [
                 'whatsAppMessage' => $responseData['messages'],
-                'ctaUrlId'        => 0,
-                'mediaId'         => null,
-                'mediaUrl'        => null,
-                'mediaPath'       => null,
-                'mediaCaption'    => null,
-                'mediaFileName'   => null,
-                'messageType'     => 'button',
-                'mimeType'        => null,
-                'mediaType'       => null
+                'ctaUrlId' => 0,
+                'mediaId' => null,
+                'mediaUrl' => null,
+                'mediaPath' => null,
+                'mediaCaption' => null,
+                'mediaFileName' => null,
+                'messageType' => 'button',
+                'mimeType' => null,
+                'mediaType' => null
             ];
         } catch (Exception $ex) {
             throw new Exception($ex->getMessage() ?? "Failed to send the message! Please try again later.");

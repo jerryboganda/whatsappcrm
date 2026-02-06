@@ -25,6 +25,8 @@ import SendCtaUrl from "./nodes/SendCtaUrl";
 import SendButtonNode from "./nodes/SendButtonNode";
 import axios from "axios";
 import SendTemplateNode from "./nodes/SendTemplateNode";
+import SendProductNode from "./nodes/SendProductNode";
+import SendMultiProductNode from "./nodes/SendMultiProductNode";
 
 const INNER_HEIGHT = window.innerHeight / 2 - 340;
 
@@ -34,7 +36,7 @@ var ExKeyword = "";
 try {
     triggerType = document.getElementById("flow-builder").dataset.trigger;
     ExKeyword = document.getElementById("flow-builder").dataset.keyword;
-} catch (e) {}
+} catch (e) { }
 
 const initialNodes = [
     {
@@ -115,6 +117,12 @@ function FlowBuilder() {
             ),
             sendButton: (props) => (
                 <SendButtonNode {...props} setNodes={setNodes} />
+            ),
+            sendProduct: (props) => (
+                <SendProductNode {...props} setNodes={setNodes} />
+            ),
+            sendMultiProduct: (props) => (
+                <SendMultiProductNode {...props} setNodes={setNodes} />
             ),
         }),
         [setNodes]
@@ -222,9 +230,8 @@ function FlowBuilder() {
                 </ReactFlow>
 
                 <div
-                    className={`flow_top_button_wrapper ${
-                        isSidebarOpen ? "sidebar_open" : ""
-                    }`}
+                    className={`flow_top_button_wrapper ${isSidebarOpen ? "sidebar_open" : ""
+                        }`}
                 >
                     <button
                         onClick={handleSaveFlow}

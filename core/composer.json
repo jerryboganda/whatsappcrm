@@ -14,6 +14,7 @@
         "btcpayserver/btcpayserver-greenfield-php": "^2.3",
         "coingate/coingate-php": "^4.1",
         "ezyang/htmlpurifier": "^4.17",
+        "facebook/php-business-sdk": "*",
         "giggsey/libphonenumber-for-php": "^8.13",
         "google/apiclient": "^2.18",
         "guzzlehttp/guzzle": "^7.8",

@@ -62,6 +62,18 @@ export default function Sidebar({ isOpen, onClose }) {
             label: "Button Message",
             description: "Make conditional choices with a interactive buttons.",
         },
+        {
+            type: "sendProduct",
+            icon: "las la-shopping-cart",
+            label: "Single Product",
+            description: "Send a single product from your catalog.",
+        },
+        {
+            type: "sendMultiProduct",
+            icon: "las la-layer-group",
+            label: "Multi-Product",
+            description: "Send multiple products organized in sections.",
+        },
     ];
 
     return (

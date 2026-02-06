@@ -38,8 +38,7 @@
                 <div class="modal-body">
                     <div class="csv-form-wrapper">
                         <div class="csv-form-wrapper__left">
-                            <form action="{{ route('user.inbox.message.template.send') }}" method="POST"
-                                id="template-form">
+                            <form action="{{ route('user.inbox.message.template.send') }}" method="POST" id="template-form">
                                 @csrf
                                 <div class="thumb-form-wrapper">
                                     <div class="form-group">
@@ -55,7 +54,8 @@
                                                     data-header-format="{{ $template->header_format }}"
                                                     data-buttons="{{ json_encode($template->buttons) }}"
                                                     data-header-media="{{ asset(getFilePath('templateHeader')) . '/' . $template->header_media }}">
-                                                    {{ __($template->name) }}</option>
+                                                    {{ __($template->name) }}
+                                                </option>
                                             @empty
                                                 <option value="">@lang('No template found')</option>
                                             @endforelse
@@ -98,8 +98,7 @@
                                 </div>
                                 <div class="preview-item__content">
                                     <div class="preview-item__shape">
-                                        <img src="{{ getImage($activeTemplateTrue . 'images/preview-1.png') }}"
-                                            alt="image">
+                                        <img src="{{ getImage($activeTemplateTrue . 'images/preview-1.png') }}" alt="image">
                                     </div>
                                     <div class="card-item">
                                         <div class="card-item__thumb header_media">
@@ -126,7 +125,7 @@
             </div>
         </div>
     </div>
-    
+
     <div class="modal custom--modal fade locationModal progressModal">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
@@ -136,7 +135,8 @@
                 <div class="modal-header">
                     <div class="modal-header__left">
                         <h5 class="modal-title">@lang('Send Location Message')</h5>
-                        <p class="modal-subtitle">@lang('Select location via google map or enter latitude and longitude.')</p>
+                        <p class="modal-subtitle">@lang('Select location via google map or enter latitude and longitude.')
+                        </p>
                     </div>
                     <div class="modal-header__right">
                         <div class="btn--group">
@@ -183,11 +183,62 @@
                             <div class="col-lg-12">
                                 <div class="form-group">
                                     <label class="label-two">@lang('Select Location via MAP')</label>
-                                    <input class="controls" id="searchBox" type="text"
-                                        placeholder="@lang('Search Here')">
+                                    <input class="controls" id="searchBox" type="text" placeholder="@lang('Search Here')">
                                     <div class="google-map" @if (gs('google_maps_api')) style="height: 400px" @endif
                                         id="map"></div>
                                 </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal custom--modal fade paymentModal">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@lang('Request Payment Link')</h5>
+                    <button type="button" class="close" data-bs-dismiss="modal" aria-label="Close">
+                        <i class="las la-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <form id="payment-link-form">
+                        @csrf
+                        <div class="row">
+                            <div class="col-lg-6">
+                                <div class="form-group">
+                                    <label class="label-two">@lang('Gateway')</label>
+                                    <select class="form--control" name="gateway" required>
+                                        <option value="stripe">@lang('Stripe')</option>
+                                        <option value="razorpay">@lang('Razorpay')</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-lg-6">
+                                <div class="form-group">
+                                    <label class="label-two">@lang('Amount')</label>
+                                    <input type="number" step="0.01" class="form--control" name="amount" required>
+                                </div>
+                            </div>
+                            <div class="col-lg-6">
+                                <div class="form-group">
+                                    <label class="label-two">@lang('Currency')</label>
+                                    <input type="text" class="form--control" name="currency" value="USD" required>
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <div class="form-group">
+                                    <label class="label-two">@lang('Description')</label>
+                                    <textarea class="form--control" name="description" required></textarea>
+                                </div>
+                            </div>
+                            <div class="col-12 text-end mt-3">
+                                <button type="button" class="btn btn--secondary"
+                                    data-bs-dismiss="modal">@lang('Close')</button>
+                                <button type="submit" class="btn btn--base">@lang('Generate Link')</button>
                             </div>
                         </div>
                     </form>
@@ -229,12 +280,12 @@
     <script src="{{ asset($activeTemplateTrue . 'js/broadcasting.js') }}"></script>
     <script
         src="https://maps.googleapis.com/maps/api/js?key={{ gs('google_maps_api') }}&libraries=drawing,places,marker&v=3.45.8">
-    </script>
+        </script>
 @endpush
 
 @push('script')
     <script>
-        (function($) {
+        (function ($) {
             "use strict";
 
             const $messageBody = $('.msg-body');
@@ -254,7 +305,7 @@
             let isSubmitting = false;
 
             function handleFormSubmit($form, url) {
-                $form.on('submit', function(e) {
+                $form.on('submit', function (e) {
                     e.preventDefault();
                     if (isSubmitting) return;
                     isSubmitting = true;
@@ -271,12 +322,12 @@
                         data: formData,
                         processData: false,
                         contentType: false,
-                        beforeSend: function() {
+                        beforeSend: function () {
                             $submitBtn.attr('disabled', true).addClass('disabled');
                             $submitBtn.html(
                                 `<div class="spinner-border text--base" role="status"></div>`);
                         },
-                        success: function(response) {
+                        success: function (response) {
                             if (response.status == 'success') {
                                 $form.trigger('reset');
                                 $messageBody.append(response.data.html);
@@ -292,7 +343,7 @@
                                 notify('error', response.message || "@lang('Something went to wrong')");
                             }
                         },
-                        complete: function() {
+                        complete: function () {
                             isSubmitting = false;
                             $submitBtn.attr('disabled', false).removeClass('disabled');
                             $submitBtn.html(messageSendSvg());
@@ -311,13 +362,55 @@
             handleFormSubmit($messageForm, "{{ route('user.inbox.message.send') }}");
             handleFormSubmit($locationForm, "{{ route('user.inbox.message.send') }}");
 
-            $(document).on('submit', '.contactSearch', function(e) {
+            const $paymentModal = $('.paymentModal');
+            const $paymentForm = $('#payment-link-form');
+
+            $(document).on('click', '.payment-modal-btn', function () {
+                $paymentModal.modal('show');
+            });
+
+            $paymentForm.on('submit', function (e) {
+                e.preventDefault();
+                let formData = new FormData(this);
+                let $submitBtn = $(this).find('button[type=submit]');
+                $submitBtn.prop('disabled', true).text('@lang("Generating...")');
+
+                $.ajax({
+                    url: "{{ route('user.payment.generate.link') }}",
+                    type: "POST",
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    success: function (response) {
+                        if (response.success) {
+                            $paymentModal.modal('hide');
+                            let currentMsg = $messageInput.val();
+                            $messageInput.val(currentMsg + (currentMsg ? "\n" : "") + "Please use this link to pay: " + response.link);
+                            notify('success', "@lang('Payment link generated and added to message box')");
+                        } else {
+                            notify('error', response.error || "@lang('Something went to wrong')");
+                        }
+                    },
+                    error: function (xhr) {
+                        let errorMsg = "@lang('Something went to wrong')";
+                        if (xhr.responseJSON && xhr.responseJSON.error) {
+                            errorMsg = xhr.responseJSON.error;
+                        }
+                        notify('error', errorMsg);
+                    },
+                    complete: function () {
+                        $submitBtn.prop('disabled', false).text("@lang('Generate Link')");
+                    }
+                });
+            });
+
+            $(document).on('submit', '.contactSearch', function (e) {
                 e.preventDefault();
                 let value = $(this).find('input[name=search]').val();
                 window.fetchChatList(value);
             });
 
-            $(document).on('click', '.resender', function() {
+            $(document).on('click', '.resender', function () {
                 if (isSubmitting) return;
 
                 const $this = $(this);
@@ -335,7 +428,7 @@
                         'message_id': messageId,
                         '_token': "{{ csrf_token() }}"
                     },
-                    success: function(response) {
+                    success: function (response) {
                         if (response.status == 'success') {
                             $messageBody.find(`[data-message-id="${messageId}"]`).remove();
                             $messageBody.append(response.data.html);
@@ -344,10 +437,10 @@
                             notify('error', response.message || "@lang('Something went to wrong')");
                         }
                     },
-                    error: function() {
+                    error: function () {
                         notify('error', "@lang('Something went wrong.')");
                     }
-                }).always(function() {
+                }).always(function () {
                     isSubmitting = false;
                     $this.removeClass('loading');
                 });
@@ -355,7 +448,7 @@
 
             const $messageInput = $(".message-input");
 
-            $messageInput.keydown(function(e) {
+            $messageInput.keydown(function (e) {
                 if (e.key === "Enter") {
                     e.preventDefault();
                     if (e.shiftKey) {
@@ -366,13 +459,13 @@
                 }
             });
 
-            $messageInput.on("focus", function() {
+            $messageInput.on("focus", function () {
                 if (!window.conversation_id) return;
                 let route = "{{ route('user.inbox.message.status', ':id') }}";
                 $.ajax({
                     url: route.replace(':id', window.conversation_id),
                     type: "GET",
-                    success: function(response) {
+                    success: function (response) {
                         if (response.status == 'success') {
                             if (response.data.unseenMessageCount == 0) {
                                 $('.chat-list__item[data-id="' + window.conversation_id + '"]')
@@ -396,7 +489,7 @@
 
             $emojiContainer.append(picker);
 
-            $emojiIcon.on("click", function(e) {
+            $emojiIcon.on("click", function (e) {
                 e.stopPropagation();
                 if (isInteractiveMessage()) return;
                 $emojiContainer.toggle();
@@ -409,7 +502,7 @@
             });
 
 
-            $(document).on("click", function(e) {
+            $(document).on("click", function (e) {
                 if (!$(e.target).closest($emojiContainer).length && !$(e.target).closest($emojiIcon).length) {
                     $emojiContainer.hide();
                     $emojiIcon.html('<i class="far fa-smile"></i>');
@@ -417,33 +510,33 @@
             });
 
             // Image Preview
-            $imageInput.on("change", function(event) {
+            $imageInput.on("change", function (event) {
                 previewFile(event, "image");
             });
 
             // Document Preview
-            $documentInput.on("change", function(event) {
+            $documentInput.on("change", function (event) {
                 previewFile(event, "document");
             });
 
             // Video Preview
-            $videoInput.on("change", function(event) {
+            $videoInput.on("change", function (event) {
                 previewFile(event, "video");
             });
 
             // Audio
-            $audioInput.on("change", function(event) {
+            $audioInput.on("change", function (event) {
                 previewFile(event, "audio");
             });
 
-            $('.select-url').on('click', function(e) {
+            $('.select-url').on('click', function (e) {
                 let url = $(this).data('id');
                 $urlInput.val(url);
                 let name = $(this).data('name');
                 previewFile(event, "url", name);
             });
 
-            $('.select-list').on('click', function(e) {
+            $('.select-list').on('click', function (e) {
                 let list = $(this).data('id');
                 $listInput.val(list);
                 let name = $(this).data('name');
@@ -451,7 +544,7 @@
             });
 
             // Block clicks on labels with media_selector if URL exists
-            $('.media_selector').on('click', function(e) {
+            $('.media_selector').on('click', function (e) {
                 if (isInteractiveMessage()) {
                     e.preventDefault();
                     e.stopImmediatePropagation(); // stop the event from reaching input
@@ -459,7 +552,7 @@
                 }
             });
 
-            $('.media-input').on('click', function(e) {
+            $('.media-input').on('click', function (e) {
                 if (isInteractiveMessage()) {
                     e.preventDefault();
                     e.stopImmediatePropagation();
@@ -484,11 +577,11 @@
                     $('.chat-list__wrapper').removeClass('show');
                     $previewContainer.empty();
                     $previewContainer.append(`
-                    <div class="preview-item url-preview text-dark">
-                        ${name}
-                        <button class="remove-preview">&times;</button>
-                    </div>
-                    `);
+                            <div class="preview-item url-preview text-dark">
+                                ${name}
+                                <button class="remove-preview">&times;</button>
+                            </div>
+                            `);
 
                     return;
                 }
@@ -499,11 +592,11 @@
                     $('.chat-list__wrapper').removeClass('show');
                     $previewContainer.empty();
                     $previewContainer.append(`
-                    <div class="preview-item url-preview text-dark">
-                        ${name}
-                        <button class="remove-preview">&times;</button>
-                    </div>
-                    `);
+                            <div class="preview-item url-preview text-dark">
+                                ${name}
+                                <button class="remove-preview">&times;</button>
+                            </div>
+                            `);
 
                     return;
                 }
@@ -513,7 +606,7 @@
 
                 const reader = new FileReader();
 
-                reader.onload = function(e) {
+                reader.onload = function (e) {
                     $previewContainer.empty();
 
                     let previewContent = "";
@@ -532,28 +625,28 @@
                             `<a href="${e.target.result}" target="_blank" class="file-preview">${result}</a>`;
                     } else if (type === "video") {
                         previewContent = `<video controls class="preview-item preview-video">
-                        <source src="${e.target.result}" type="${file.type}">
-                            Your browser does not support the video tag.
-                        </video>`;
+                                <source src="${e.target.result}" type="${file.type}">
+                                    Your browser does not support the video tag.
+                                </video>`;
                     } else if (type === "audio") {
                         previewContent = `<audio controls class="preview-item preview-audio">
-                        <source src="${e.target.result}" type="${file.type}">
-                            Your browser does not support the audio tag.
-                        </audio>`;
+                                <source src="${e.target.result}" type="${file.type}">
+                                    Your browser does not support the audio tag.
+                                </audio>`;
                     }
 
                     $previewContainer.append(`
-                    <div class="preview-item image-preview">
-                        ${previewContent}
-                        <button class="remove-preview">&times;</button>
-                    </div>
-                    `);
+                            <div class="preview-item image-preview">
+                                ${previewContent}
+                                <button class="remove-preview">&times;</button>
+                            </div>
+                            `);
                 };
 
                 reader.readAsDataURL(file);
             }
 
-            $previewContainer.on("click", ".remove-preview", function() {
+            $previewContainer.on("click", ".remove-preview", function () {
                 $(this).closest(".image-preview").remove();
                 clearImagePreview();
                 $('.message-input').attr('readonly', false);
@@ -576,8 +669,8 @@
                     const CHANNEL_NAME = `private-${eventName}-${whatsapp}`;
                     pusher.config.authEndpoint = makeAuthEndPointForPusher(SOCKET_ID, CHANNEL_NAME);
                     let channel = pusher.subscribe(CHANNEL_NAME);
-                    channel.bind('pusher:subscription_succeeded', function() {
-                        channel.bind(eventName, function(data) {
+                    channel.bind('pusher:subscription_succeeded', function () {
+                        channel.bind(eventName, function (data) {
                             $("body").find('.empty-conversation').remove();
                             $("body").find(".chatbox-area__body").removeClass('d-none');
                             const {
@@ -587,7 +680,7 @@
                             if ($messageBody.find(`[data-message-id="${messageId}"]`)
                                 .length) {
                                 $messageBody.find(
-                                        `[data-message-id="${data.data.messageId}"]`)
+                                    `[data-message-id="${data.data.messageId}"]`)
                                     .find('.message-status').html(data.data.statusHtml);
                             } else {
 
@@ -627,11 +720,11 @@
 
             pusherConnection('receive-message', "{{ $whatsappAccount->id }}");
 
-            $('.chat-media__btn, .chat-media__list').on('click', function() {
+            $('.chat-media__btn, .chat-media__list').on('click', function () {
                 $('.chat-media__list').toggleClass('show');
             });
 
-            $('.chat-media__btn').on('click', function() {
+            $('.chat-media__btn').on('click', function () {
                 $('.chat-url__list').removeClass('show');
                 $('.chat-list__wrapper').removeClass('show');
             });
@@ -639,7 +732,7 @@
             const input = document.getElementById("searchBox");
             const mapKey = "{{ gs('google_maps_api') }}"; // TODO:: need to replace code with previous version
 
-            $('.location-modal-btn').on('click', function() {
+            $('.location-modal-btn').on('click', function () {
                 if (!mapKey || mapKey == "") {
                     $('.preview-item__content').html(
                         `<div class="empty-preview"><h6 class="empty-preview__title">@lang('Google Maps preview is currently unavailable.')</h6></div>`
@@ -655,7 +748,7 @@
             let map, marker;
             let autocompleteService, placesService;
 
-            $locationModal.on("shown.bs.modal", function() {
+            $locationModal.on("shown.bs.modal", function () {
                 if (input) {
                     input.dataset.attached = "";
                 }
@@ -764,11 +857,11 @@
 
             $locationModal.find('input[name="latitude"], input[name="longitude"]').on('input', markMapFromInputs);
 
-            $('.cta-url-btn').on('click', function(e) {
+            $('.cta-url-btn').on('click', function (e) {
                 $('.chat-url__list').toggleClass('show');
             });
 
-            $('.interactive_list_btn').on('click', function(e) {
+            $('.interactive_list_btn').on('click', function (e) {
                 $('.chat-list__wrapper').toggleClass('show');
             });
 
@@ -776,12 +869,12 @@
 
             function messageSendSvg() {
                 return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
-                        <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path>
-                        <path d="M22 2L11 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path>
-                    </svg>`
+                                <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path>
+                                <path d="M22 2L11 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path>
+                            </svg>`
             }
 
-            $(document).on('click', '.ai-response-button', function(e) {
+            $(document).on('click', '.ai-response-button', function (e) {
                 e.preventDefault();
                 e.stopPropagation();
 
@@ -800,14 +893,14 @@
                         message: $message,
                         _token: "{{ csrf_token() }}"
                     },
-                    success: function(response) {
+                    success: function (response) {
                         if (response.status == 'success') {
                             $messageInput.val(response.data.ai_response);
                         } else {
                             notify('error', response.message || "@lang('Something went to wrong')");
                         }
                     },
-                    complete: function() {
+                    complete: function () {
                         isSubmitting = false;
                         $messageInput.attr('readonly', false).attr('placeholder',
                             '@lang('Type your message here message...')');
@@ -815,7 +908,7 @@
                 });
             });
 
-            $(document).on('click', '.ai-translate-button', function(e) {
+            $(document).on('click', '.ai-translate-button', function (e) {
                 e.preventDefault();
                 e.stopPropagation();
 
@@ -841,7 +934,7 @@
                         message: $message,
                         _token: "{{ csrf_token() }}"
                     },
-                    success: function(response) {
+                    success: function (response) {
                         if (response.status == 'success') {
                             $messageContent.find('.translate-text').text(response.data.ai_response)
                                 .removeClass('text--base text-muted');
@@ -858,16 +951,16 @@
             const $templateForm = $('#template-form');
             const $buttonPrevContainer = $(".button-preview");
 
-            $('.template_button').on('click', function() {
+            $('.template_button').on('click', function () {
                 $templateModal.modal('show');
             });
 
-            $templateModal.on('hide.bs.modal', function() {
+            $templateModal.on('hide.bs.modal', function () {
                 $templateForm.trigger('reset');
                 $templateForm.find('select[name=template_id]').trigger('change');
             });
 
-            $templateForm.on('submit', function(e) {
+            $templateForm.on('submit', function (e) {
                 e.preventDefault();
 
                 const formData = new FormData(this);
@@ -887,9 +980,9 @@
                     headers: {
                         'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
                     },
-                    xhr: function() {
+                    xhr: function () {
                         const xhr = new window.XMLHttpRequest();
-                        xhr.upload.addEventListener('progress', function(e) {
+                        xhr.upload.addEventListener('progress', function (e) {
                             if (e.lengthComputable) {
                                 const percent = (e.loaded / e.total) * 100;
                                 $bar.css('width', percent + '%');
@@ -897,7 +990,7 @@
                         }, false);
                         return xhr;
                     },
-                    success: function(res) {
+                    success: function (res) {
                         $progress.addClass('d-none');
                         $bar.css('width', '0%');
 
@@ -917,7 +1010,7 @@
                             notify('error', res.message || "Something went wrong");
                         }
                     },
-                    error: function(xhr) {
+                    error: function (xhr) {
                         $progress.addClass('d-none');
                         $bar.css('width', '0%');
 
@@ -929,14 +1022,14 @@
                         }
                         notify('error', errorMessage);
                     },
-                    complete: function() {
+                    complete: function () {
                         $templateModal.modal('hide');
                     }
                 });
             });
 
 
-            $('select[name=template_id]').on('change', function() {
+            $('select[name=template_id]').on('change', function () {
                 generateParamsField.call(this);
                 showTemplatePreview.call(this);
             }).trigger('change');
@@ -958,8 +1051,8 @@
                 }
 
                 return `<button type="button" class="btn btn--template bg-white w-100" data-type="${btnType}">
-                                ${btnIcon} ${btnText}
-                            </button>`
+                                        ${btnIcon} ${btnText}
+                                    </button>`
             }
 
             function generateParamsField() {
@@ -972,12 +1065,12 @@
 
                 if (totalHeaderMatches && totalHeaderMatches.length > 0) {
                     let html = ``;
-                    $.each(totalHeaderMatches, function(index, value) {
+                    $.each(totalHeaderMatches, function (index, value) {
                         html += `
-                        <div class="form-group">
-                            <label class="label-two">Variable ${value}</label>
-                            <input type="text" data-name="${value}" name="header_variables[${value}]" class="form--control form-two dynamic-filed"  placeholder="Enter value for ${value}" required>
-                        </div>`;
+                                <div class="form-group">
+                                    <label class="label-two">Variable ${value}</label>
+                                    <input type="text" data-name="${value}" name="header_variables[${value}]" class="form--control form-two dynamic-filed"  placeholder="Enter value for ${value}" required>
+                                </div>`;
                     });
                     $('#template-header-variables').html(html);
                     $('.header-variable-area').removeClass('d-none');
@@ -997,12 +1090,12 @@
 
                 if (totalBodyMatches && totalBodyMatches.length > 0) {
                     let html = ``;
-                    $.each(totalBodyMatches, function(index, value) {
+                    $.each(totalBodyMatches, function (index, value) {
                         html += `
-                        <div class="form-group">
-                            <label class="label-two">Variable ${value}</label>
-                            <input type="text" data-name="${value}" name="body_variables[${value}]" class="form--control form-two dynamic-filed"  placeholder="Enter value for ${value}" required>
-                        </div>`;
+                                <div class="form-group">
+                                    <label class="label-two">Variable ${value}</label>
+                                    <input type="text" data-name="${value}" name="body_variables[${value}]" class="form--control form-two dynamic-filed"  placeholder="Enter value for ${value}" required>
+                                </div>`;
                     });
                     $('#template-body-variables').html(html);
                     $('.body-variable-area').removeClass('d-none');
@@ -1028,7 +1121,7 @@
 
                     $carouselPreview.empty();
 
-                    $.each(carouselCards, function(index, card) {
+                    $.each(carouselCards, function (index, card) {
                         const cardHtml = templateCardHtml(card, index);
                         $carouselPreview.append(cardHtml);
                     });
@@ -1052,15 +1145,15 @@
                 } else if (headerFormat === 'VIDEO' && headerMediaPath) {
                     $headerText.text('');
                     $headerMedia.html(`
-                    <video controls>
-                        <source src="${headerMediaPath}" type="video/mp4">
-                    </video>
-                    `);
+                            <video controls>
+                                <source src="${headerMediaPath}" type="video/mp4">
+                            </video>
+                            `);
                 } else if (headerFormat === 'DOCUMENT' && headerMediaPath) {
                     $headerText.text('');
                     $headerMedia.html(`
-                    <embed class="pdf-embed" src="${headerMediaPath}" type="application/pdf" width="100%" height="200px" style="border: none">
-                    `);
+                            <embed class="pdf-embed" src="${headerMediaPath}" type="application/pdf" width="100%" height="200px" style="border: none">
+                            `);
                 } else {
                     $headerMedia.empty();
                     if (templateHeaderText == null) {
@@ -1073,7 +1166,7 @@
                 if (templateButtons.length > 0) {
                     $buttonPrevContainer.removeClass('d-none');
                     $buttonPrevContainer.empty();
-                    $.each(templateButtons, function(index, button) {
+                    $.each(templateButtons, function (index, button) {
                         const buttonHtml = templateButtonHtml(button.type, button.text);
                         $buttonPrevContainer.append(buttonHtml);
                     });
@@ -1093,45 +1186,45 @@
                 var buttonHtml = "";
 
                 if (card.buttons.buttons && card.buttons.buttons.length > 0) {
-                    $.each(card.buttons.buttons, function(index, button) {
+                    $.each(card.buttons.buttons, function (index, button) {
                         let text = button.text;
                         if (button.type === 'QUICK_REPLY') {
                             buttonHtml += `
-                             <button type="button" class="btn btn--template bg-white w-100" data-type="QUICK_REPLY">
-                                <i class="las la-reply"></i> <span class="text">${text}</span>
-                            </button>
-                            `;
+                                     <button type="button" class="btn btn--template bg-white w-100" data-type="QUICK_REPLY">
+                                        <i class="las la-reply"></i> <span class="text">${text}</span>
+                                    </button>
+                                    `;
                         } else if (button.type === 'URL') {
                             buttonHtml += `
-                             <button type="button" class="btn btn--template bg-white w-100" data-type="URL">
-                                <i class="la la-external-link-alt"></i> <span class="text">${text}</span>
-                            </button>
-                            `;
+                                     <button type="button" class="btn btn--template bg-white w-100" data-type="URL">
+                                        <i class="la la-external-link-alt"></i> <span class="text">${text}</span>
+                                    </button>
+                                    `;
                         } else {
                             buttonHtml += `
-                             <button type="button" class="btn btn--template bg-white w-100" data-type="PHONE_NUMBER">
-                                <i class="la la-phone"></i> <span class="text">${text}</span>
-                            </button>
-                            `;
+                                     <button type="button" class="btn btn--template bg-white w-100" data-type="PHONE_NUMBER">
+                                        <i class="la la-phone"></i> <span class="text">${text}</span>
+                                    </button>
+                                    `;
                         }
                     });
                 }
 
                 const cardHtml = `
-                    <div class="card-item col-12" data-card-index="${index}">
-                        <div class="card-item__thumb">
-                            ${mediaHtml}
-                        </div>
-                        ${bodyHtml}
-                        <div class="button-preview mt-2 d-flex gap-2 flex-column">
-                            ${buttonHtml}
-                        </div>
-                    </div>
-                `;
+                            <div class="card-item col-12" data-card-index="${index}">
+                                <div class="card-item__thumb">
+                                    ${mediaHtml}
+                                </div>
+                                ${bodyHtml}
+                                <div class="button-preview mt-2 d-flex gap-2 flex-column">
+                                    ${buttonHtml}
+                                </div>
+                            </div>
+                        `;
                 return cardHtml;
             }
 
-            $(document).on('mousedown', '.code-btn', function(e) {
+            $(document).on('mousedown', '.code-btn', function (e) {
                 e.preventDefault();
                 let code = $(this).data('code');
                 let focusedInput = $('.dynamic-filed:focus');
@@ -1142,30 +1235,30 @@
 
             // send list message
             const $sectionWrapper = $('.message-preview-list__section_wrapper');
-            $(document).on('click', '.list-message-btn', function(e) {
+            $(document).on('click', '.list-message-btn', function (e) {
                 const interactiveList = $(this).data('list');
                 const sections = interactiveList.sections;
 
                 $sectionWrapper.html('');
                 sections.forEach((section, index) => {
                     const sectionHtml = `
-                    <div class="message-preview-list__section" data-section-index="${index}">
-                        <p class="message-preview-list__section-title">${section.title}</p>
-                        <div class="row_wrapper">
-                            ${section.rows.map(row => {
-                                return `
-                                                <div class="message-preview-list__row">
-                                                    <div class="message-preview-list__text">
-                                                        <p class="title">${row.title}</p>
-                                                        <p class="desc">${row.description}</p>
-                                                    </div>
-                                                    <span class="message-preview-list__radio"></span>
-                                                </div>
-                                                `;
-                            }).join('')}
-                        </div>
-                    </div>
-                    `;
+                            <div class="message-preview-list__section" data-section-index="${index}">
+                                <p class="message-preview-list__section-title">${section.title}</p>
+                                <div class="row_wrapper">
+                                    ${section.rows.map(row => {
+                        return `
+                                                        <div class="message-preview-list__row">
+                                                            <div class="message-preview-list__text">
+                                                                <p class="title">${row.title}</p>
+                                                                <p class="desc">${row.description}</p>
+                                                            </div>
+                                                            <span class="message-preview-list__radio"></span>
+                                                        </div>
+                                                        `;
+                    }).join('')}
+                                </div>
+                            </div>
+                            `;
                     $sectionWrapper.append(sectionHtml);
                 });
 
@@ -1177,7 +1270,7 @@
                 $listMessageModal.modal('show');
             });
 
-            $listMessageModal.on('hide.bs.modal', function() {
+            $listMessageModal.on('hide.bs.modal', function () {
                 setTimeout(() => {
                     $sectionWrapper.html('');
                 }, 500);

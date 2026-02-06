@@ -17,8 +17,8 @@ class FlowBuilderController extends Controller
     public function index()
     {
         $pageTitle = "Automation Flow List";
-        $user      = getParentUser();
-        $flows     =   Flow::where('user_id', $user->id)->orderBy('id', 'desc')->searchable(['name'])->paginate(getPaginate());
+        $user = getParentUser();
+        $flows = Flow::where('user_id', $user->id)->orderBy('id', 'desc')->searchable(['name'])->paginate(getPaginate());
 
         return view('Template::user.flow.index', compact('pageTitle', 'flows'));
     }
@@ -26,11 +26,11 @@ class FlowBuilderController extends Controller
     public function create()
     {
         $pageTitle = "Create Automation Flow";
-        $view      = 'Template::user.flow.create';
+        $view = 'Template::user.flow.create';
 
         return responseManager("flow_builder", $pageTitle, "success", [
-            'view'           => $view,
-            'pageTitle'      => $pageTitle,
+            'view' => $view,
+            'pageTitle' => $pageTitle,
         ]);
     }
 
@@ -142,19 +142,19 @@ class FlowBuilderController extends Controller
                 ];
             }
 
-            $flowNode                           = new FlowNode();
-            $flowNode->flow_id                  = $flow->id;
-            $flowNode->node_id                  = $node['id'];
-            $flowNode->type                     = getNodeType($node['type']);
-            $flowNode->text                     = @$node['data']['message'] ?? null;
-            $flowNode->position_x               = @$node['position']['x'] ?? null;
-            $flowNode->position_y               = @$node['position']['y'] ?? null;
-            $flowNode->location                 = $location;
-            $flowNode->nodes_json               = json_encode($node);
+            $flowNode = new FlowNode();
+            $flowNode->flow_id = $flow->id;
+            $flowNode->node_id = $node['id'];
+            $flowNode->type = getNodeType($node['type']);
+            $flowNode->text = @$node['data']['message'] ?? null;
+            $flowNode->position_x = @$node['position']['x'] ?? null;
+            $flowNode->position_y = @$node['position']['y'] ?? null;
+            $flowNode->location = $location;
+            $flowNode->nodes_json = json_encode($node);
 
-            $flowNode->header_params          = $headerParams;
-            $flowNode->body_params            = $bodyParams;
-            
+            $flowNode->header_params = $headerParams;
+            $flowNode->body_params = $bodyParams;
+
             if ($node['type'] == 'sendButton') {
                 $flowNode->buttons_json = json_encode($node['data'] ?? []);
             }
@@ -164,8 +164,11 @@ class FlowBuilderController extends Controller
             if ($node['type'] == 'sendList') {
                 $flowNode->interactive_list_id = @$node['data']['selectedList']['id'] ?? 0;
             }
-            if($node['type'] == 'sendTemplate') {
+            if ($node['type'] == 'sendTemplate') {
                 $flowNode->template_id = @$node['data']['selectedTemplate']['id'] ?? 0;
+            }
+            if ($node['type'] == 'sendProduct' || $node['type'] == 'sendMultiProduct') {
+                $flowNode->options_json = $node['data'] ?? [];
             }
 
             $flowNode->save();
@@ -225,9 +228,9 @@ class FlowBuilderController extends Controller
         $pageTitle = "Edit Flow - " . $flow->name;
 
         return responseManager("flow_builder", $pageTitle, "success", [
-            'view'           => $view,
-            'pageTitle'      => $pageTitle,
-            'flow'           => $flow
+            'view' => $view,
+            'pageTitle' => $pageTitle,
+            'flow' => $flow
         ]);
     }
 
@@ -242,7 +245,7 @@ class FlowBuilderController extends Controller
         }
 
         foreach ($flow->nodes as $node) {
-            $media  = $node->media;
+            $media = $node->media;
             if ($media) {
                 $filePath = getFilePath('flowBuilderMedia') . '/' . $media->media_path;
                 if ($media->media_path && file_exists($filePath)) {
@@ -282,10 +285,10 @@ class FlowBuilderController extends Controller
 
         $oldNodeMedia = FlowNodeMedia::where('user_id', $user->id)->where('flow_node_id', $request->node_id)->first();
 
-        $nodeMedia               = new FlowNodeMedia();
-        $nodeMedia->user_id      = $user->id;
+        $nodeMedia = new FlowNodeMedia();
+        $nodeMedia->user_id = $user->id;
         $nodeMedia->flow_node_id = $request->node_id;
-        $nodeMedia->media_type   = getNodeMediaIntType($request->type);
+        $nodeMedia->media_type = getNodeMediaIntType($request->type);
 
         if ($request->hasFile('file')) {
             try {

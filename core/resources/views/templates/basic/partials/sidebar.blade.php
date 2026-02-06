@@ -20,17 +20,17 @@
                 </li>
             </x-permission_check>
             <x-permission_check :permission="[
-                'view contact',
-                'view contact list',
-                'view contact tag',
-                'view template',
-                'view campaign',
-                'view welcome message',
-                'view shortlink',
-                'view floater',
-            ]">
+        'view contact',
+        'view contact list',
+        'view contact tag',
+        'view template',
+        'view campaign',
+        'view welcome message',
+        'view shortlink',
+        'view floater',
+    ]">
                 <li class="sidebar-menu-list__title">
-                    <span class="text">@lang('MARKETING TOOLS')</span>
+                    <span class="text">@lang('BROADCASTING TOOLS')</span>
                 </li>
             </x-permission_check>
             <x-permission_check :permission="['view contact', 'view contact list', 'view contact tag']">
@@ -103,7 +103,7 @@
                 <li class="sidebar-menu-list__item has-dropdown {{ menuActive('user.campaign.*') }}">
                     <a href="#" class="sidebar-menu-list__link">
                         <span class="icon"> <i class="fa-solid fa-volume-high"></i> </span>
-                        <span class="text">@lang('Manage Campaigns')</span>
+                        <span class="text">@lang('Broadcasting')</span>
                     </a>
                     <div class="sidebar-submenu">
                         <ul class="sidebar-submenu-list">
@@ -125,6 +125,56 @@
                     </div>
                 </li>
             </x-permission_check>
+
+            <li class="sidebar-menu-list__item {{ menuActive('user.ads.*') }}">
+                <a href="{{ route('user.ads.index') }}" class="sidebar-menu-list__link">
+                    <span class="icon"> <i class="las la-ad"></i> </span>
+                    <span class="text">@lang('Meta Ads (CTWA)')</span>
+                </a>
+            </li>
+
+            <x-permission_check :permission="['add floater', 'view floater']">
+                <li class="sidebar-menu-list__item has-dropdown {{ menuActive('user.floater.*') }}">
+                    <a href="#" class="sidebar-menu-list__link">
+                        <span class="icon">
+                            <i class="fa-brands fa-whatsapp"></i>
+                        </span>
+                        <span class="text">@lang('Manage Floaters')</span>
+                    </a>
+                    <div class="sidebar-submenu">
+                        <ul class="sidebar-submenu-list">
+                            <x-permission_check permission="add floater">
+                                <li class="sidebar-submenu-list__item {{ menuActive('user.floater.create') }}">
+                                    <a href="{{ route('user.floater.create') }}" class="sidebar-submenu-list__link">
+                                        <span class="text">@lang('Create Floater')</span>
+                                    </a>
+                                </li>
+                            </x-permission_check>
+                            <x-permission_check permission="view floater">
+                                <li class="sidebar-submenu-list__item {{ menuActive('user.floater.index') }}">
+                                    <a href="{{ route('user.floater.index') }}" class="sidebar-submenu-list__link">
+                                        <span class="text">@lang('Manage Floater')</span>
+                                    </a>
+                                </li>
+                            </x-permission_check>
+                        </ul>
+                    </div>
+                </li>
+            </x-permission_check>
+
+            <li class="sidebar-menu-list__item {{ menuActive('user.orders.index') }}">
+                <a href="{{ route('user.orders.index') }}" class="sidebar-menu-list__link">
+                    <span class="icon"><i class="las la-shopping-cart"></i></span>
+                    <span class="text">@lang('Orders')</span>
+                </a>
+            </li>
+            <li class="sidebar-menu-list__item {{ menuActive('user.payment.config') }}">
+                <a href="{{ route('user.payment.config') }}" class="sidebar-menu-list__link">
+                    <span class="icon"><i class="las la-credit-card"></i></span>
+                    <span class="text">@lang('Payment Config')</span>
+                </a>
+            </li>
+
             <x-permission_check :permission="['view welcome message', 'view flow builder']">
                 <li
                     class="sidebar-menu-list__item has-dropdown {{ menuActive(['user.automation.*', 'user.flow.builder.*']) }}">
@@ -145,12 +195,16 @@
                             </x-permission_check>
                             <x-permission_check permission="view flow builder">
                                 <li class="sidebar-submenu-list__item {{ menuActive('user.flow.builder.index') }}">
-                                    <a href="{{ route('user.flow.builder.index') }}"
-                                        class="sidebar-submenu-list__link">
+                                    <a href="{{ route('user.flow.builder.index') }}" class="sidebar-submenu-list__link">
                                         <span class="text">@lang('Flow Builder')</span>
                                     </a>
                                 </li>
                             </x-permission_check>
+                            <li class="sidebar-submenu-list__item {{ menuActive('user.dialogflow.index') }}">
+                                <a href="{{ route('user.dialogflow.index') }}" class="sidebar-submenu-list__link">
+                                    <span class="text">@lang('Dialogflow')</span>
+                                </a>
+                            </li>
                             <li class="sidebar-submenu-list__item {{ menuActive('user.automation.ai.assistant') }}">
                                 <a href="{{ route('user.automation.ai.assistant') }}"
                                     class="sidebar-submenu-list__link">
@@ -171,8 +225,7 @@
                         <ul class="sidebar-submenu-list">
                             <x-permission_check permission="add shortlink">
                                 <li class="sidebar-submenu-list__item {{ menuActive('user.shortlink.create') }}">
-                                    <a href="{{ route('user.shortlink.create') }}"
-                                        class="sidebar-submenu-list__link">
+                                    <a href="{{ route('user.shortlink.create') }}" class="sidebar-submenu-list__link">
                                         <span class="text">@lang('Create ShortLink')</span>
                                     </a>
                                 </li>
@@ -255,8 +308,7 @@
                     <div class="sidebar-submenu">
                         <ul class="sidebar-submenu-list">
                             <x-permission_check permission="add interactive list">
-                                <li
-                                    class="sidebar-submenu-list__item {{ menuActive('user.interactive-list.create') }}">
+                                <li class="sidebar-submenu-list__item {{ menuActive('user.interactive-list.create') }}">
                                     <a href="{{ route('user.interactive-list.create') }}"
                                         class="sidebar-submenu-list__link">
                                         <span class="text">@lang('Create List')</span>
@@ -264,8 +316,7 @@
                                 </li>
                             </x-permission_check>
                             <x-permission_check permission="view interactive list">
-                                <li
-                                    class="sidebar-submenu-list__item {{ menuActive('user.interactive-list.index') }}">
+                                <li class="sidebar-submenu-list__item {{ menuActive('user.interactive-list.index') }}">
                                     <a href="{{ route('user.interactive-list.index') }}"
                                         class="sidebar-submenu-list__link">
                                         <span class="text">@lang('Interactive List')</span>

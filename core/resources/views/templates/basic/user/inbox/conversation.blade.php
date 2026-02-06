@@ -17,8 +17,19 @@
             <div class="chatbox-wrapper__tab">
                 <ul class="nav nav-pills custom--tab tab-two" id="chat-filters">
                     <li class="nav-item">
-                        <button class="nav-link {{ activeClass((string) !request()->status) }}"
+                        <button class="nav-link {{ activeClass(!request()->status && !request()->filter) }}"
                             data-status="0">@lang('All')
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link {{ activeClass(request()->filter == 'mine') }}"
+                            data-filter="mine">@lang('Mine')
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link {{ activeClass(request()->filter == 'unassigned') }}"
+                            data-filter="unassigned">
+                            @lang('Unassigned')
                         </button>
                     </li>
                     <li class="nav-item">
@@ -60,7 +71,7 @@
 @push('script')
     <script>
         "use strict";
-        (function($) {
+        (function ($) {
 
             const $conversationListWrapper = $('#chat-list');
             const $messageBody = $('.msg-body');
@@ -69,7 +80,9 @@
             let moreConversationList = true;
             let isFetchConversation = true;
             let page = 1;
+
             let status = "{{ request()->status ?? 0 }}";
+            let filter = "{{ request()->filter ?? '' }}";
 
             window.conversation_id = "{{ $conversationId }}";
             window.whatsapp_account_id = "{{ request()->whatsapp_account_id ?? 0 }}";
@@ -79,7 +92,7 @@
             let moreMessageList = true;
             let isFetchMessage = true;
 
-            window.fetchChatList = function(search = '', resetPage = false) {
+            window.fetchChatList = function (search = '', resetPage = false) {
                 if (resetPage) {
                     page = 1;
                 }
@@ -89,11 +102,12 @@
                     method: 'GET',
                     data: {
                         status,
+                        filter,
                         search,
                         conversation_id: window.conversation_id,
                         whatsapp_account_id: window.whatsapp_account_id,
                     },
-                    beforeSend: function() {
+                    beforeSend: function () {
                         isFetchConversation = true;
                         if (page == 1) {
                             $conversationListWrapper.html(conversationSkeleton());
@@ -101,7 +115,7 @@
                             $conversationListWrapper.append(conversationSkeleton());
                         }
                     },
-                    success: function(response) {
+                    success: function (response) {
                         isFetchConversation = false;
                         if (response.status == 'success') {
                             moreConversationList = response.data.more;
@@ -118,7 +132,7 @@
                             $conversationListWrapper.html(errorHtml());
                         }
                     },
-                    error: function() {
+                    error: function () {
                         isFetchConversation = false;
                         $conversationListWrapper.html(errorHtml());
                     }
@@ -127,10 +141,10 @@
 
             function conversationSkeleton() {
 
-                let html = `<div class="conversation-loader text-center d-flex align-items-center justify-content-center flex-column  ${page==1 ? 'h-50vh' : 'my-5'}">
-                    <div class="spinner-border text--base" role="status"></div>
-                ${page==1 ? `<p class="fs-16 mt-1">@lang('Conversation is Loading')...</p>` : ''}
-                </div>`
+                let html = `<div class="conversation-loader text-center d-flex align-items-center justify-content-center flex-column  ${page == 1 ? 'h-50vh' : 'my-5'}">
+                                    <div class="spinner-border text--base" role="status"></div>
+                                ${page == 1 ? `<p class="fs-16 mt-1">@lang('Conversation is Loading')...</p>` : ''}
+                                </div>`
 
                 return html;
             }
@@ -138,9 +152,9 @@
             function messageLoader() {
                 $messageBody.addClass("h-100");
                 let html = `<div class="message-loader text-center h-100 d-flex align-items-center justify-content-center flex-column py-4">
-                    <div class="spinner-border text--base" role="status"></div>
-                ${messagePage==1 ? `<p class="fs-16 mt-1">@lang('Message is Loading')...</p>` : ''}
-                </div>`
+                                    <div class="spinner-border text--base" role="status"></div>
+                                ${messagePage == 1 ? `<p class="fs-16 mt-1">@lang('Message is Loading')...</p>` : ''}
+                                </div>`
 
                 return html;
             }
@@ -148,38 +162,38 @@
             function contactDetailsLoader() {
 
                 return `<div class="skeleton-wrapper">
-                    <div class="skeleton skeleton-circle"></div>
+                                    <div class="skeleton skeleton-circle"></div>
 
-                    <div class="skeleton skeleton-text skeleton-text-md"></div>
+                                    <div class="skeleton skeleton-text skeleton-text-md"></div>
 
-                    <div class="skeleton-buttons">
-                        <div class="skeleton skeleton-btn"></div>
-                        <div class="skeleton skeleton-btn"></div>
-                    </div>
+                                    <div class="skeleton-buttons">
+                                        <div class="skeleton skeleton-btn"></div>
+                                        <div class="skeleton skeleton-btn"></div>
+                                    </div>
 
-                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
-                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
-                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
-                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
-                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
-                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
-                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
-                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
-                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
-                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
-                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
-                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
-                </div>`
+                                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
+                                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
+                                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
+                                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
+                                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
+                                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
+                                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
+                                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
+                                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
+                                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
+                                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
+                                    <div class="skeleton skeleton-text skeleton-text-sm"></div>
+                                </div>`
             }
 
             function errorHtml() {
                 return ` <div class="error-message server-error-message text-center d-flex justify-content-center align-items-center flex-column gap-1 h-100">
-                        <img src="{{ asset($activeTemplateTrue . 'images/server_error.png') }}" alt="empty">
-                        <p class="fs-14">@lang('Something went wrong. Please try later')</p>
-                    </div>`
+                                        <img src="{{ asset($activeTemplateTrue . 'images/server_error.png') }}" alt="empty">
+                                        <p class="fs-14">@lang('Something went wrong. Please try later')</p>
+                                    </div>`
             }
 
-            $('.chat-list').on('scroll', function() {
+            $('.chat-list').on('scroll', function () {
                 const el = this;
                 if (el.scrollTop + el.clientHeight >= el.scrollHeight - 50) {
                     if (moreConversationList && !isFetchConversation) {
@@ -188,7 +202,7 @@
                 }
             });
 
-            $('.msg-body').on('scroll', function() {
+            $('.msg-body').on('scroll', function () {
                 var scrollTop = $(this).scrollTop();
                 if (scrollTop <= 10) {
                     if (moreMessageList && !isFetchMessage) {
@@ -197,16 +211,36 @@
                 }
             });
 
-            $('#chat-filters').on('click', 'button', function() {
+            $('#chat-filters').on('click', 'button', function () {
                 page = 1;
                 status = $(this).data('status');
+                filter = $(this).data('filter');
+
+                if (filter) {
+                    status = 0; // reset status if filter is selected
+                } else if (status) {
+                    filter = ''; // reset filter if status is selected
+                    if (status == 0) filter = '';
+                } else {
+                    // All clicked
+                    status = 0;
+                    filter = '';
+                }
+
                 $('#chat-filters button').removeClass('active');
                 $(this).addClass('active');
                 window.fetchChatList();
-                changeURL("status", status);
+
+                if (filter) {
+                    changeURL("filter", filter);
+                    changeURL("status", 0); // clear status
+                } else {
+                    changeURL("status", status);
+                    changeURL("filter", ''); // clear filter
+                }
             });
 
-            $('.conversation-search').on('keypress', function(e) {
+            $('.conversation-search').on('keypress', function (e) {
                 if (e.which === 13) {
                     let value = $(this).val();
                     page = 1;
@@ -214,7 +248,7 @@
                 }
             });
 
-            $('.chat-list').on('click', '.chat-list__item', function() {
+            $('.chat-list').on('click', '.chat-list__item', function () {
                 $(".empty-conversation").remove();
                 $(".chatbox-area__body").removeClass('d-none');
                 window.conversation_id = $(this).data('id');
@@ -236,7 +270,7 @@
                 window.history.pushState({}, '', url);
             }
 
-            function loadMessages(search = '', ) {
+            function loadMessages(search = '',) {
 
                 let url = "{{ route('user.inbox.conversation.message', ':id') }}" + `?page=${messagePage}`;
 
@@ -247,7 +281,7 @@
                         status,
                         search
                     },
-                    beforeSend: function() {
+                    beforeSend: function () {
                         isFetchMessage = true;
                         if (messagePage == 1) {
                             $messageBody.html(messageLoader());
@@ -255,7 +289,7 @@
                             $messageBody.prepend(messageLoader());
                         }
                     },
-                    success: function(response) {
+                    success: function (response) {
                         if (response.status == 'success') {
                             $messageBody.find('.message-loader').remove();
                             isFetchMessage = false;
@@ -273,7 +307,15 @@
                                 `${maskMobile}`;
                             $('.contact__name').text(contact.full_name);
                             $('.contact__mobile').text(mobileNumber);
+                            $('.contact__mobile').text(mobileNumber);
                             $('.contact__profile').attr('src', image_src);
+
+                            // Update Assignee Dropdown
+                            let assigneeId = response.data.conversation.assignee_id;
+                            // Use a flag to prevent triggering the change event loop
+                            window.isUpdatingAssignment = true;
+                            $('.assign-agent').val(assigneeId).trigger('change');
+                            window.isUpdatingAssignment = false;
 
                             if (messagePage == 1) {
                                 $messageBody.html(response.data.html);
@@ -287,7 +329,7 @@
                         }
                         messagePage++;
                     },
-                    error: function() {
+                    error: function () {
                         isFetchMessage = false;
                         $messageBody.html(errorHtml());
                     }
@@ -299,10 +341,10 @@
                 $.ajax({
                     url: url.replace(':id', window.conversation_id),
                     method: 'GET',
-                    beforeSend: function() {
+                    beforeSend: function () {
                         $contactDetails.html(contactDetailsLoader());
                     },
-                    success: function(response) {
+                    success: function (response) {
                         if (response.status == 'success') {
                             $contactDetails.html(response.data.html);
                             if (response.data.isBlocked == '{{ Status::YES }}') {
@@ -314,19 +356,19 @@
                             $contactDetails.html(errorHtml());
                         }
                     },
-                    error: function() {
+                    error: function () {
                         $contactDetails.html(errorHtml());
                     }
                 });
             }
 
-            $('.contact__details').on('change', ".statusForm select[name=conversation_status]", function() {
+            $('.contact__details').on('change', ".statusForm select[name=conversation_status]", function () {
                 let value = $(this).val();
                 let route = "{{ route('user.inbox.conversation.status', ':id') }}";
                 $.post(route.replace(':id', window.conversation_id), {
                     status: value,
                     _token: "{{ csrf_token() }}"
-                }, function(data) {
+                }, function (data) {
                     notify(data.status, data.message);
                 });
             });
@@ -344,10 +386,28 @@
                 loadContact();
             }
 
-            $('select[name=whatsapp_account_id]').on('change', function() {
+            $('select[name=whatsapp_account_id]').on('change', function () {
                 const id = $(this).val();
                 const url = "{{ route('user.inbox.list') }}?whatsapp_account_id=" + id;
                 window.location = url;
+            });
+
+            $('.assign-agent').on('change', function () {
+                if (window.isUpdatingAssignment) return;
+
+                let agentId = $(this).val();
+                let url = "{{ route('user.inbox.conversation.assign', ':id') }}";
+
+                $.post(url.replace(':id', window.conversation_id), {
+                    assignee_id: agentId,
+                    _token: "{{ csrf_token() }}"
+                }, function (response) {
+                    if (response.status != 'success') {
+                        notify('error', response.message);
+                    } else {
+                        notify('success', response.message);
+                    }
+                });
             });
 
             function maskNumber(number, visibleDigits = 2, maskChar = "*") {

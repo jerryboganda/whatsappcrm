@@ -18,6 +18,7 @@ use libphonenumber\PhoneNumberUtil;
 use App\Traits\WhatsappManager;
 use Carbon\Carbon;
 use Exception;
+use App\Models\Order;
 
 class WebhookController extends Controller
 {
@@ -37,48 +38,54 @@ class WebhookController extends Controller
     public function webhookResponse(Request $request)
     {
         $entry = $request->input('entry', []);
-        if (!is_array($entry)) return;
+        if (!is_array($entry))
+            return;
 
         $receiverPhoneNumber = null;
-        $senderPhoneNumber   = null;
-        $senderId            = null;
-        $messageStatus       = null;
-        $messageId           = null;
-        $messageText         = null;
-        $buttonReply         = null;
-        $listReply           = null;
-        $mediaId             = null;
-        $mediaType           = null;
-        $mediaMimeType       = null;
-        $messageType         = 'text';
-        $messageCaption      = null;
-        $profileName         = null;
+        $senderPhoneNumber = null;
+        $senderId = null;
+        $messageStatus = null;
+        $messageId = null;
+        $messageText = null;
+        $buttonReply = null;
+        $listReply = null;
+        $mediaId = null;
+        $mediaType = null;
+        $mediaMimeType = null;
+        $messageType = 'text';
+        $messageCaption = null;
+        $profileName = null;
 
         $whatsappAccount = WhatsappAccount::where('whatsapp_business_account_id', $entry[0]['id'])->first();
 
-        if (!$whatsappAccount) return;
+        if (!$whatsappAccount)
+            return;
 
         $user = User::active()->find($whatsappAccount->user_id);
 
-        if (!$user) return;
+        if (!$user)
+            return;
 
         foreach ($entry as $entryItem) {
 
             foreach ($entryItem['changes'] as $change) {
 
-                if (!is_array($change) || !isset($change['value'])) continue;
+                if (!is_array($change) || !isset($change['value']))
+                    continue;
 
                 if (isset($change['field']) && $change['field'] == 'message_template_status_update') {
                     sleep(10); // wait for 10 seconds until the template store
                     $this->templateUpdateNotify($change['value']['message_template_id'], $change['value']['event'], $change['value']['reason'] ?? '');
                     continue;
-                };
+                }
+                ;
 
                 $metaValue = $change['value'];
-                if (!is_array($metaValue)) continue;
+                if (!is_array($metaValue))
+                    continue;
 
                 $profileName = $metaValue['contacts'][0]['profile']['name'] ?? null;
-                $metaData    = $metaValue['metadata'] ?? [];
+                $metaData = $metaValue['metadata'] ?? [];
                 $metaMessage = $metaValue['messages'] ?? null;
 
                 if (isset($metaData['phone_number_id'])) {
@@ -117,9 +124,9 @@ class WebhookController extends Controller
                     if (isset($metaMessage[0]['interactive']['button_reply']['title'])) {
                         $buttonReply = $metaMessage[0]['interactive']['button_reply']['title'];
                     }
-                    if(isset($metaMessage[0]['interactive']['list_reply']['title'])) {
+                    if (isset($metaMessage[0]['interactive']['list_reply']['title'])) {
                         $listReply = [
-                            'title' => $metaMessage[0]['interactive']['list_reply']['title'] ?? '', 
+                            'title' => $metaMessage[0]['interactive']['list_reply']['title'] ?? '',
                             'description' => $metaMessage[0]['interactive']['list_reply']['description'] ?? '',
                         ];
                     }
@@ -158,14 +165,14 @@ class WebhookController extends Controller
                 $html = view('Template::user.inbox.single_message', compact('message'))->render();
 
                 event(new ReceiveMessage($whatsappAccount->id, [
-                    'html'           => $html,
-                    'messageId'      => $message->id,
-                    'message'        => $message,
-                    'statusHtml'     => $message->statusBadge,
-                    'newMessage'     => $isNewMessage,
-                    'mediaPath'      => getFilePath('conversation'),
+                    'html' => $html,
+                    'messageId' => $message->id,
+                    'message' => $message,
+                    'statusHtml' => $message->statusBadge,
+                    'newMessage' => $isNewMessage,
+                    'mediaPath' => getFilePath('conversation'),
                     'conversationId' => $wMessage->conversation_id,
-                    'unseenMessage'  => $wMessage->conversation->unseenMessages()->count() < 10 ? $wMessage->conversation->unseenMessages()->count() : '9+',
+                    'unseenMessage' => $wMessage->conversation->unseenMessages()->count() < 10 ? $wMessage->conversation->unseenMessages()->count() : '9+',
                 ]));
 
                 return response()->json(['status' => 'received'], 200);
@@ -175,11 +182,11 @@ class WebhookController extends Controller
         if (($messageText || $buttonReply || $listReply || $mediaId) && $senderPhoneNumber && $senderId) {
             // Save the incoming message first
             $receiverPhoneNumber = preg_replace('/\D/', '', $receiverPhoneNumber);
-            $phoneUtil           = PhoneNumberUtil::getInstance();
-            $parseNumber         = $phoneUtil->parse('+' . $senderPhoneNumber, '');
-            $countryCode         = $parseNumber->getCountryCode();
-            $nationalNumber      = $parseNumber->getNationalNumber();
-            $newContact          = false;
+            $phoneUtil = PhoneNumberUtil::getInstance();
+            $parseNumber = $phoneUtil->parse('+' . $senderPhoneNumber, '');
+            $countryCode = $parseNumber->getCountryCode();
+            $nationalNumber = $parseNumber->getNationalNumber();
+            $newContact = false;
 
             $contact = Contact::where('mobile_code', $countryCode)
                 ->where('mobile', $nationalNumber)
@@ -188,42 +195,42 @@ class WebhookController extends Controller
                 ->first();
 
             if (!$contact) {
-                $newContact           = true;
-                $contact              = new Contact();
-                $contact->firstname   = $profileName;
+                $newContact = true;
+                $contact = new Contact();
+                $contact->firstname = $profileName;
                 $contact->mobile_code = $countryCode;
-                $contact->mobile      = $nationalNumber;
-                $contact->user_id     = $user->id;
+                $contact->mobile = $nationalNumber;
+                $contact->user_id = $user->id;
                 $contact->save();
             }
 
             $conversation = Conversation::where('contact_id', $contact->id)->where('user_id', $user->id)->where('whatsapp_account_id', $whatsappAccount->id)->first();
             if (!$conversation) {
-                $newContact   = true;
+                $newContact = true;
                 $conversation = $this->createConversation($contact, $whatsappAccount);
             }
 
             $messageExists = Message::where('whatsapp_message_id', $senderId)->exists();
 
-            $whatsappLib   = new WhatsAppLib();
+            $whatsappLib = new WhatsAppLib();
             $automationLib = new AutomationLib();
 
             if (!$messageExists) {
                 // Save the incoming message
-                $message                      = new Message();
+                $message = new Message();
                 $message->whatsapp_account_id = $whatsappAccount->id;
                 $message->whatsapp_message_id = $senderId;
-                $message->user_id             = $user->id ?? 0;
-                $message->conversation_id     = $conversation->id;
-                $message->message             = $messageText ?? $buttonReply ?? '';
-                $message->list_reply          = $listReply;
-                $message->type                = Status::MESSAGE_RECEIVED;
-                $message->message_type        = getIntMessageType($messageType);
-                $message->media_id            = $mediaId;
-                $message->media_type          = $mediaType;
-                $message->media_caption       = $messageCaption;
-                $message->mime_type           = $mediaMimeType;
-                $message->ordering            = Carbon::now();
+                $message->user_id = $user->id ?? 0;
+                $message->conversation_id = $conversation->id;
+                $message->message = $messageText ?? $buttonReply ?? '';
+                $message->list_reply = $listReply;
+                $message->type = Status::MESSAGE_RECEIVED;
+                $message->message_type = getIntMessageType($messageType);
+                $message->media_id = $mediaId;
+                $message->media_type = $mediaType;
+                $message->media_caption = $messageCaption;
+                $message->mime_type = $mediaMimeType;
+                $message->ordering = Carbon::now();
                 $message->save();
 
                 $conversation->last_message_at = Carbon::now();
@@ -236,8 +243,8 @@ class WebhookController extends Controller
                         $mediaUrl = $whatsappLib->getMediaUrl($mediaId, $accessToken);
 
                         if ($mediaUrl && $mediaType == 'image') {
-                            $mediaPath           = $whatsappLib->storedMediaToLocal($mediaUrl['url'], $mediaId, $accessToken, $user->id);
-                            $message->media_url  = $mediaUrl;
+                            $mediaPath = $whatsappLib->storedMediaToLocal($mediaUrl['url'], $mediaId, $accessToken, $user->id);
+                            $message->media_url = $mediaUrl;
                             $message->media_path = $mediaPath;
 
                             $message->save();
@@ -246,19 +253,58 @@ class WebhookController extends Controller
                     }
                 }
 
-                $html                        = view('Template::user.inbox.single_message', compact('message'))->render();
+                // Handle Order Messages
+                if ($messageType == 'order') {
+                    $orderData = $metaMessage[0]['order'] ?? null;
+                    if ($orderData) {
+                        try {
+                            $totalAmount = 0;
+                            $currency = 'USD';
+                            $products = [];
+
+                            foreach ($orderData['product_items'] as $item) {
+                                $totalAmount += $item['item_price'] * $item['quantity'];
+                                $currency = $item['currency'];
+                                $products[] = [
+                                    'retailer_id' => $item['product_retailer_id'],
+                                    'quantity' => $item['quantity'],
+                                    'price' => $item['item_price'],
+                                    'currency' => $item['currency']
+                                ];
+                            }
+
+                            $order = new Order();
+                            $order->user_id = $user->id;
+                            $order->contact_id = $contact->id;
+                            $order->conversation_id = $conversation->id;
+                            $order->amount = $totalAmount;
+                            $order->currency = $currency;
+                            $order->status = 'pending';
+                            $order->products_json = $products;
+                            $order->save();
+
+                            // Optional: Send auto-reply for order received
+                            $whatsappLib->sendAutoReply($user, $conversation, "Order Received: #" . $order->id);
+
+                        } catch (Exception $e) {
+                            // Log error
+                        }
+                    }
+                }
+
+                $html = view('Template::user.inbox.single_message', compact('message'))->render();
                 $lastConversationMessageHtml = view("Template::user.inbox.conversation_last_message", compact('message'))->render();
 
                 event(new ReceiveMessage($whatsappAccount->id, [
-                    'html'            => $html,
-                    'message'         => $message,
-                    'newMessage'      => true,
-                    'newContact'      => $newContact,
+                    'html' => $html,
+                    'message' => $message,
+                    'newMessage' => true,
+                    'newContact' => $newContact,
                     'lastMessageHtml' => $lastConversationMessageHtml,
-                    'unseenMessage'   => $conversation->unseenMessages()->count() < 10 ? $conversation->unseenMessages()->count() : '9+',
-                    'lastMessageAt'   => showDateTime(Carbon::now()),
-                    'conversationId'  => $conversation->id,
-                    'mediaPath'       => getFilePath('conversation')
+                    'unseenMessage' => $conversation->unseenMessages()->count() < 10 ? $conversation->unseenMessages()->count() : '9+',
+                    'lastMessageAt' => showDateTime(Carbon::now()),
+                    'conversationId' => $conversation->id,
+                    'mediaPath' => getFilePath('conversation')
                 ]));
             }
 
@@ -288,12 +334,52 @@ class WebhookController extends Controller
                             $automationFlow = $automationFlowQuery->keywordMatch()->where('keyword', $messageText)->first();
                         }
                     }
-                    if (!$automationFlow) return;
-
                     if ($automationFlow) {
                         $automationLib->process($user, $automationFlow, $lastState, $conversation, $queryText);
                     } else {
-                        $whatsappLib->sendAutoReply($user, $conversation, $messageText);
+                        // Dialogflow Logic
+                        $dialogflowConfig = \App\Models\DialogflowConfig::where('user_id', $user->id)->where('status', 1)->first();
+                        $dialogflowResponse = null;
+
+                        if ($dialogflowConfig) {
+                            try {
+                                $dialogflowService = new \App\Lib\Dialogflow\DialogflowService($dialogflowConfig);
+                                $dialogflowResult = $dialogflowService->detectIntent($conversation->id, $messageText);
+
+                                if ($dialogflowResult && !empty($dialogflowResult['fulfillmentText'])) {
+                                    $dialogflowResponse = $dialogflowResult['fulfillmentText'];
+                                }
+                            } catch (\Exception $e) {
+                                // Log error or ignore
+                            }
+                        }
+
+                        if ($dialogflowResponse) {
+                            // Send Dialogflow Response
+                            $request = new Request(['message' => $dialogflowResponse]);
+                            $messageSend = $whatsappLib->messageSend($request, $conversation->contact->mobileNumber, $whatsappAccount);
+
+                            if ($messageSend) {
+                                extract($messageSend);
+                                $message = new Message();
+                                $message->user_id = $user->id;
+                                $message->whatsapp_account_id = $whatsappAccount->id;
+                                $message->whatsapp_message_id = $whatsAppMessage[0]['id'];
+                                $message->conversation_id = $conversation->id;
+                                $message->type = Status::MESSAGE_SENT;
+                                $message->message = $dialogflowResponse;
+                                $message->message_type = getIntMessageType($messageType);
+                                $message->status = Status::MESSAGE_SENT;
+                                $message->ordering = Carbon::now();
+                                $message->save();
+
+                                $conversation->last_message_at = Carbon::now();
+                                $conversation->save();
+                            }
+
+                        } else {
+                            $whatsappLib->sendAutoReply($user, $conversation, $messageText);
+                        }
                     }
                 }
             }
@@ -304,10 +390,10 @@ class WebhookController extends Controller
 
     private function createConversation($contact, $whatsappAccount)
     {
-        $conversation                      = new Conversation();
-        $conversation->contact_id          = $contact->id;
+        $conversation = new Conversation();
+        $conversation->contact_id = $contact->id;
         $conversation->whatsapp_account_id = $whatsappAccount->id;
-        $conversation->user_id             = $whatsappAccount->user_id;
+        $conversation->user_id = $whatsappAccount->user_id;
         $conversation->save();
 
         return $conversation;

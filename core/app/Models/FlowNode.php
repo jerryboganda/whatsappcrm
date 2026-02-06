@@ -8,10 +8,11 @@ class FlowNode extends Model
 {
 
     protected $casts = [
-        'buttons_json'  => 'array',
-        'location'      => 'array',
+        'buttons_json' => 'array',
+        'options_json' => 'array',
+        'location' => 'array',
         'header_params' => 'array',
-        'body_params'   => 'array',
+        'body_params' => 'array',
     ];
 
     public function flow()

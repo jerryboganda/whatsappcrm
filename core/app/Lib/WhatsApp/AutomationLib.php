@@ -21,7 +21,8 @@ class AutomationLib
     {
         $whatsappAccount = $user->currentWhatsapp();
 
-        if (!$flow || !$conversation || !$message || !$user || !$whatsappAccount) return;
+        if (!$flow || !$conversation || !$message || !$user || !$whatsappAccount)
+            return;
 
         if ($lastState && $lastState->status == Status::FLOW_STATE_WAITING) {
 
@@ -30,7 +31,7 @@ class AutomationLib
                 ->first();
 
             if ($lastNode && $lastNode->type == Status::NODE_TYPE_BUTTON) {
-                $buttons = json_decode($lastNode->buttons_json, true);
+                $buttons = $lastNode->buttons_json;
                 $clickedIndex = null;
                 foreach ($buttons['buttons'] as $index => $btn) {
                     if (trim(strtolower($btn['text'])) == trim(strtolower($message))) {
@@ -56,7 +57,8 @@ class AutomationLib
 
     private function sendInitialNodes($whatsappAccount, $conversation, $node)
     {
-        if (!$node) return;
+        if (!$node)
+            return;
 
         $this->sendMessageAndTrack($whatsappAccount, $conversation, $node);
 
@@ -93,11 +95,17 @@ class AutomationLib
             }
         } elseif ($node->type == Status::NODE_TYPE_BUTTON) {
             $messageSend = $whatsappLib->sendButtonMessage($conversation->contact->mobileNumber, $whatsappAccount, $node);
+        } elseif ($node->type == Status::NODE_TYPE_PRODUCT) {
+            $productData = $node->options_json;
+            $messageSend = $whatsappLib->sendProductMessage($conversation->contact->mobileNumber, $whatsappAccount, $productData);
+        } elseif ($node->type == Status::NODE_TYPE_MULTI_PRODUCT) {
+            $productData = $node->options_json;
+            $messageSend = $whatsappLib->sendMultiProductMessage($conversation->contact->mobileNumber, $whatsappAccount, $productData);
         } elseif ($node->type == Status::NODE_TYPE_TEMPLATE) {
             $template = Template::where('user_id', $whatsappAccount->user_id)->find($node->template_id);
-            if($template) {
+            if ($template) {
                 $request = new Request([]);
-                $messageSend = $whatsappLib->sendTemplateMessage($request, $whatsappAccount, $template, $conversation->contact,$node);
+                $messageSend = $whatsappLib->sendTemplateMessage($request, $whatsappAccount, $template, $conversation->contact, $node);
             }
         } else {
             $request = new Request([]);
@@ -114,51 +122,52 @@ class AutomationLib
             $messageSend = $whatsappLib->messageSend($request, $conversation->contact->mobileNumber, $whatsappAccount);
         }
 
-        if(!$messageSend) return;
+        if (!$messageSend)
+            return;
 
         extract($messageSend);
 
-        $message                      = new Message();
-        $message->user_id             = $whatsappAccount->user_id;
+        $message = new Message();
+        $message->user_id = $whatsappAccount->user_id;
         $message->whatsapp_account_id = $whatsappAccount->id;
         $message->whatsapp_message_id = $whatsAppMessage[0]['id'];
-        $message->conversation_id     = $conversation->id;
-        $message->cta_url_id          = $ctaUrlId ?? 0;
+        $message->conversation_id = $conversation->id;
+        $message->cta_url_id = $ctaUrlId ?? 0;
         $message->interactive_list_id = $interactiveListId ?? 0;
-        $message->type                = Status::MESSAGE_SENT;
-        $message->message             = $node->type == Status::NODE_TYPE_TEXT ? $node->text : '';
-        $message->media_id            = $mediaId;
-        $message->message_type        = getIntMessageType($messageType);
-        $message->location            = $location ?? null;
-        $message->flow_id             = $node->flow_id;
-        $message->flow_node_id        = $node->id;
-        $message->media_caption       = $mediaCaption;
-        $message->media_filename      = $mediaFileName;
-        $message->media_url           = $mediaUrl;
-        $message->media_path          = $mediaPath;
-        $message->mime_type           = $mimeType;
-        $message->media_type          = $mediaType;
-        $message->status              = Status::SENT;
-        $message->ordering            = Carbon::now();
+        $message->type = Status::MESSAGE_SENT;
+        $message->message = $node->type == Status::NODE_TYPE_TEXT ? $node->text : '';
+        $message->media_id = $mediaId;
+        $message->message_type = getIntMessageType($messageType);
+        $message->location = $location ?? null;
+        $message->flow_id = $node->flow_id;
+        $message->flow_node_id = $node->id;
+        $message->media_caption = $mediaCaption;
+        $message->media_filename = $mediaFileName;
+        $message->media_url = $mediaUrl;
+        $message->media_path = $mediaPath;
+        $message->mime_type = $mimeType;
+        $message->media_type = $mediaType;
+        $message->status = Status::SENT;
+        $message->ordering = Carbon::now();
         $message->save();
 
-        $conversation->last_message_at   = Carbon::now();
+        $conversation->last_message_at = Carbon::now();
         $conversation->needs_human_reply = Status::YES;
         $conversation->save();
 
-        $html                        = view('Template::user.inbox.single_message', compact('message'))->render();
+        $html = view('Template::user.inbox.single_message', compact('message'))->render();
         $lastConversationMessageHtml = view("Template::user.inbox.conversation_last_message", compact('message'))->render();
 
         event(new ReceiveMessage($whatsappAccount->id, [
-            'html'            => $html,
-            'message'         => $message,
-            'newMessage'      => true,
-            'newContact'      => false,
+            'html' => $html,
+            'message' => $message,
+            'newMessage' => true,
+            'newContact' => false,
             'lastMessageHtml' => $lastConversationMessageHtml,
-            'unseenMessage'   => $conversation->unseenMessages()->count() < 10 ? $conversation->unseenMessages()->count() : '9+',
-            'lastMessageAt'   => showDateTime(Carbon::now()),
-            'conversationId'  => $conversation->id,
-            'mediaPath'       => getFilePath('conversation')
+            'unseenMessage' => $conversation->unseenMessages()->count() < 10 ? $conversation->unseenMessages()->count() : '9+',
+            'lastMessageAt' => showDateTime(Carbon::now()),
+            'conversationId' => $conversation->id,
+            'mediaPath' => getFilePath('conversation')
         ]));
 
         $state = ContactFlowState::where('conversation_id', $conversation->id)
@@ -171,9 +180,9 @@ class AutomationLib
             $state->flow_id = $node->flow_id;
         }
 
-        $state->current_node_id    = $node->node_id;
-        $state->status             = ($node->type == Status::NODE_TYPE_BUTTON) ? Status::FLOW_STATE_WAITING : Status::FLOW_STATE_SENT;
-        $state->button_index       = $buttonIndex;
+        $state->current_node_id = $node->node_id;
+        $state->status = ($node->type == Status::NODE_TYPE_BUTTON) ? Status::FLOW_STATE_WAITING : Status::FLOW_STATE_SENT;
+        $state->button_index = $buttonIndex;
         $state->last_interacted_at = now();
         $state->save();
     }

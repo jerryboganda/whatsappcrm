@@ -26,13 +26,13 @@ use Illuminate\Support\Facades\Schema;
 
 function systemDetails()
 {
-    $system['name']                = 'ovowpp';
-    $system['web_version']         = '1.6';
+    $system['name'] = 'ovowpp';
+    $system['web_version'] = '1.6';
     $system['admin_panel_version'] = '1.0.1';
-    $system['mobile_app_version']  = '1.6';
-    $system['android_version']     = '1.0';
-    $system['ios_version']         = '1.0';
-    $system['flutter_version']     = '1.0';
+    $system['mobile_app_version'] = '1.6';
+    $system['android_version'] = '1.0';
+    $system['ios_version'] = '1.0';
+    $system['flutter_version'] = '1.0';
     return $system;
 }
 
@@ -43,7 +43,8 @@ function slug($string)
 
 function verificationCode($length)
 {
-    if ($length == 0) return 0;
+    if ($length == 0)
+        return 0;
     $min = pow(10, $length - 1);
     $max = (int) ($min - 1) . '9';
     return random_int($min, $max);
@@ -63,7 +64,8 @@ function getNumber($length = 8)
 function activeTemplate($asset = false)
 {
     $template = session('template') ?? gs('active_template');
-    if ($asset) return 'assets/templates/' . $template . '/';
+    if ($asset)
+        return 'assets/templates/' . $template . '/';
     return 'templates.' . $template . '.';
 }
 
@@ -254,8 +256,8 @@ function notify($user, $templateName, $shortCodes = null, $sendVia = null, $crea
     if (is_null($sendVia)) {
         $sendNotificationChannel = [
             'email' => 'email',
-            'sms'   => 'sms',
-            'push'  => 'push',
+            'sms' => 'sms',
+            'push' => 'push',
         ];
     } else {
         $sendNotificationChannel = $sendVia;
@@ -280,20 +282,20 @@ function notify($user, $templateName, $shortCodes = null, $sendVia = null, $crea
 
     $shortCodes = array_merge($shortCodes ?? [], $globalShortCodes);
 
-    $notify               = new Notify($sendNotificationChannel);
+    $notify = new Notify($sendNotificationChannel);
     $notify->templateName = $templateName;
-    $notify->shortCodes   = $shortCodes;
-    $notify->user         = $user;
-    $notify->createLog    = $createLog;
-    $notify->pushImage    = $pushImage;
-    $notify->userColumn   = isset($user->id) ? $user->getForeignKey() : 'user_id';
+    $notify->shortCodes = $shortCodes;
+    $notify->user = $user;
+    $notify->createLog = $createLog;
+    $notify->pushImage = $pushImage;
+    $notify->userColumn = isset($user->id) ? $user->getForeignKey() : 'user_id';
     $notify->send();
 }
 
 function getPaginate($paginate = null)
 {
     if (!$paginate) {
-        $paginate = request()->paginate ??   gs('paginate_number');
+        $paginate = request()->paginate ?? gs('paginate_number');
     }
     return $paginate;
 }
@@ -317,13 +319,16 @@ function menuActive($routeName, $param = null, $className = 'active')
 
     if (is_array($routeName)) {
         foreach ($routeName as $key => $value) {
-            if (request()->routeIs($value)) return $className;
+            if (request()->routeIs($value))
+                return $className;
         }
     } elseif (request()->routeIs($routeName)) {
         if ($param) {
             $routeParam = array_values(@request()->route()->parameters ?? []);
-            if (strtolower(@$routeParam[0]) == strtolower($param)) return $className;
-            else return;
+            if (strtolower(@$routeParam[0]) == strtolower($param))
+                return $className;
+            else
+                return;
         }
         return $className;
     }
@@ -534,13 +539,14 @@ function gs($key = null)
         $general = GeneralSetting::first();
         Cache::put('GeneralSetting', $general);
     }
-    if ($key) return @$general->$key;
+    if ($key)
+        return @$general->$key;
     return $general;
 }
 function isImage($string)
 {
     $allowedExtensions = array('jpg', 'jpeg', 'png', 'gif');
-    $fileExtension     = pathinfo($string, PATHINFO_EXTENSION);
+    $fileExtension = pathinfo($string, PATHINFO_EXTENSION);
     return in_array($fileExtension, $allowedExtensions);
 }
 
@@ -557,7 +563,7 @@ function isHtml($string)
 function convertToReadableSize($size)
 {
     preg_match('/^(\d+)([KMG])$/', $size, $matches);
-    $size = (int)$matches[1];
+    $size = (int) $matches[1];
     $unit = $matches[2];
 
     if ($unit == 'G') {
@@ -591,8 +597,10 @@ function apiResponse(string $remark, string $status, array $message = [], array 
         'status' => $status
     ];
 
-    if (count($message)) $response['message'] = $message;
-    if (count($data)) $response['data'] = $data;
+    if (count($message))
+        $response['message'] = $message;
+    if (count($data))
+        $response['data'] = $data;
 
     return response()->json($response, $statusCode);
 }
@@ -718,7 +726,8 @@ function userReferralCommission($user, $amount = 0)
     $referralPercentage = gs('referral_amount_percentage');
     $commissionAmount = ($amount * $referralPercentage) / 100;
 
-    if (!$referrer || $referralPercentage <= 0 || $commissionAmount <= 0) return false;
+    if (!$referrer || $referralPercentage <= 0 || $commissionAmount <= 0)
+        return false;
     $referrer->balance +=
         $commissionAmount;
     $referrer->save();
@@ -769,25 +778,49 @@ function setCodeValue($code, $contact)
 {
     $user = getParentUser();
 
-    switch ($code) {
-        case '{{ contactName }}':
-            $result = $contact ? $contact->fullName : ' Sir';
-            break;
-        case '{{ contactMobile }}':
-            $result = $contact->mobileNumber;
-            break;
-        case '{{ userName }}':
-            $result = $user->fullName;
-            break;
-        case '{{ userMobile }}':
-            $result = $user->mobileNumber;
-            break;
-        default:
-            $result = " ";
-            break;
+    // Normalize code: remove {{ }} and trim
+    $cleanKey = trim(str_replace(['{{', '}}'], '', $code));
+
+    // 1. Standard Fallbacks
+    switch ($cleanKey) {
+        case 'contactName':
+            return $contact ? $contact->fullName : 'there';
+        case 'contactMobile':
+            return $contact->mobileNumber;
+        case 'userName':
+            return $user->fullName;
+        case 'userMobile':
+            return $user->mobileNumber;
     }
 
-    return $result;
+    // 2. Dynamic Contact Attributes (e.g. contact.email, contact.company)
+    if ($contact && str_starts_with($cleanKey, 'contact.')) {
+        $attribute = substr($cleanKey, 8); // remove 'contact.' prefix
+
+        // A. Direct Database Column
+        if (!empty($contact->$attribute)) {
+            return $contact->$attribute;
+        }
+
+        // B. Custom Attribute in 'details' JSON
+        $details = $contact->details ?? [];
+        if (is_array($details) && isset($details[$attribute])) {
+            return $details[$attribute];
+        }
+
+        // C. Check key in details without array check (if cast is missing)
+        if (is_string($details)) {
+            $decoded = json_decode($details, true);
+            if (isset($decoded[$attribute])) {
+                return $decoded[$attribute];
+            }
+        }
+    }
+
+    // 3. Keep original if no match found (or return empty space as before)
+    // The previous logic returned " ", which clears unmatched codes. 
+    // We will stick to that to avoid sending raw delimiters.
+    return " ";
 }
 
 function parseTemplateParams(array $params, $contact)
@@ -810,14 +843,24 @@ function parseTemplateParams(array $params, $contact)
     return $updatedParams;
 }
 
-function importFileReader($file, $columns, $uniqueColumns = [], $dataInsert = true, $modelClass =
-Contact::class, $references = [])
-{
-    $fileRead                 = new ImportFileReader($file, $modelClass);
-    $fileRead->columns        = $columns;
-    $fileRead->uniqueColumns  = $uniqueColumns;
+function importFileReader(
+    $file,
+    $columns,
+    $uniqueColumns = [],
+    $dataInsert = true,
+    $modelClass =
+    Contact::class,
+    $references = [],
+    $aliases = [],
+    $fallbackMap = []
+) {
+    $fileRead = new ImportFileReader($file, $modelClass);
+    $fileRead->columns = $columns;
+    $fileRead->uniqueColumns = $uniqueColumns;
     $fileRead->dataInsertMode = $dataInsert;
-    $fileRead->references     = $references;
+    $fileRead->references = $references;
+    $fileRead->aliases = $aliases;
+    $fileRead->fallbackMap = $fallbackMap;
     $fileRead->readFile();
     return $fileRead;
 }
@@ -902,9 +945,11 @@ function userSubscriptionExpiredCheck($user = null)
 
 function featureAccessLimitCheck($feature, $limit = 1)
 {
-    if ($feature == Status::UNLIMITED) return true;
+    if ($feature == Status::UNLIMITED)
+        return true;
 
-    if ($feature && $feature >= $limit) return true;
+    if ($feature && $feature >= $limit)
+        return true;
 
     return false;
 }
@@ -915,7 +960,8 @@ function decrementFeature($user, $feature, $count = 1)
         return;
     }
 
-    if ($user->$feature == Status::UNLIMITED) return;
+    if ($user->$feature == Status::UNLIMITED)
+        return;
 
     $user->decrement($feature, $count);
 }
@@ -928,9 +974,11 @@ function getFeatureLimit($feature, $count = 1, $user = null)
         $user = $authUser;
     }
 
-    if (!Schema::hasColumn('users', $feature)) return;
+    if (!Schema::hasColumn('users', $feature))
+        return;
 
-    if ($feature = Status::UNLIMITED || $user->$feature == Status::UNLIMITED) return Status::UNLIMITED;
+    if ($feature = Status::UNLIMITED || $user->$feature == Status::UNLIMITED)
+        return Status::UNLIMITED;
 
     return getAmount($user->$feature) + getAmount($count);
 }
@@ -955,7 +1003,7 @@ function strPlural(int $value, string $label)
 
 function createAiSetting($user)
 {
-    $aiSetting          = new AiUserSetting();
+    $aiSetting = new AiUserSetting();
     $aiSetting->user_id = $user->id;
     $aiSetting->save();
 }
@@ -963,15 +1011,16 @@ function createAiSetting($user)
 function getIntMessageType($messageType)
 {
     return match ($messageType) {
-        'text'        => Status::TEXT_TYPE_MESSAGE,
-        'image'       => Status::IMAGE_TYPE_MESSAGE,
-        'video'       => Status::VIDEO_TYPE_MESSAGE,
-        'document'    => Status::DOCUMENT_TYPE_MESSAGE,
-        'audio'       => Status::AUDIO_TYPE_MESSAGE,
-        'url'         => Status::URL_TYPE_MESSAGE,
-        'button'      => Status::BUTTON_TYPE_MESSAGE,
-        'location'    => Status::LOCATION_TYPE_MESSAGE,
-        'list'        => Status::LIST_TYPE_MESSAGE,
+        'text' => Status::TEXT_TYPE_MESSAGE,
+        'image' => Status::IMAGE_TYPE_MESSAGE,
+        'video' => Status::VIDEO_TYPE_MESSAGE,
+        'document' => Status::DOCUMENT_TYPE_MESSAGE,
+        'audio' => Status::AUDIO_TYPE_MESSAGE,
+        'url' => Status::URL_TYPE_MESSAGE,
+        'button' => Status::BUTTON_TYPE_MESSAGE,
+        'location' => Status::LOCATION_TYPE_MESSAGE,
+        'list' => Status::LIST_TYPE_MESSAGE,
+        'order' => Status::ORDER_TYPE_MESSAGE,
         'interactive' => Status::REPLY_TYPE_MESSAGE,
         default => null
     };
@@ -980,15 +1029,15 @@ function getIntMessageType($messageType)
 function getNodeType($type)
 {
     return match ($type) {
-        'textMessage'  => Status::NODE_TYPE_TEXT,
-        'sendImage'    => Status::NODE_TYPE_IMAGE,
-        'sendVideo'    => Status::NODE_TYPE_VIDEO,
+        'textMessage' => Status::NODE_TYPE_TEXT,
+        'sendImage' => Status::NODE_TYPE_IMAGE,
+        'sendVideo' => Status::NODE_TYPE_VIDEO,
         'sendDocument' => Status::NODE_TYPE_DOCUMENT,
-        'sendAudio'    => Status::NODE_TYPE_AUDIO,
-        'sendList'     => Status::NODE_TYPE_LIST,
-        'sendCtaUrl'   => Status::NODE_TYPE_CTA_URL,
+        'sendAudio' => Status::NODE_TYPE_AUDIO,
+        'sendList' => Status::NODE_TYPE_LIST,
+        'sendCtaUrl' => Status::NODE_TYPE_CTA_URL,
         'sendLocation' => Status::NODE_TYPE_LOCATION,
-        'sendButton'   => Status::NODE_TYPE_BUTTON,
+        'sendButton' => Status::NODE_TYPE_BUTTON,
         'sendTemplate' => Status::NODE_TYPE_TEMPLATE,
         default => null
     };
@@ -997,19 +1046,19 @@ function getNodeType($type)
 function getNodeMediaIntType($type)
 {
     return match ($type) {
-        'image'     => Status::NODE_MEDIA_IMAGE,
-        'video'     => Status::NODE_MEDIA_VIDEO,
-        'audio'     => Status::NODE_MEDIA_AUDIO,
-        'document'  => Status::NODE_MEDIA_DOCUMENT,
+        'image' => Status::NODE_MEDIA_IMAGE,
+        'video' => Status::NODE_MEDIA_VIDEO,
+        'audio' => Status::NODE_MEDIA_AUDIO,
+        'document' => Status::NODE_MEDIA_DOCUMENT,
     };
 }
 
 function getNodeMediaStringType($int)
 {
     return [
-        Status::NODE_MEDIA_IMAGE    => 'image',
-        Status::NODE_MEDIA_VIDEO    => 'video',
-        Status::NODE_MEDIA_AUDIO    => 'audio',
+        Status::NODE_MEDIA_IMAGE => 'image',
+        Status::NODE_MEDIA_VIDEO => 'video',
+        Status::NODE_MEDIA_AUDIO => 'audio',
         Status::NODE_MEDIA_DOCUMENT => 'document',
     ][$int];
 }

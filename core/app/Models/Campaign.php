@@ -10,7 +10,7 @@ class Campaign extends Model
 {
     protected $casts = [
         'template_header_params' => 'array',
-        'template_body_params'   => 'array',
+        'template_body_params' => 'array',
     ];
 
     public function user()
@@ -19,7 +19,7 @@ class Campaign extends Model
     }
     public function whatsappAccount()
     {
-        return $this->belongsTo(WhatsappAccount::class,'whatsapp_account_id');
+        return $this->belongsTo(WhatsappAccount::class, 'whatsapp_account_id');
     }
 
     public function messages()
@@ -59,14 +59,19 @@ class Campaign extends Model
         });
     }
 
-        /**
-     * specified column for export with column manipulation 
+    public function linkLogs()
+    {
+        return $this->hasMany(LinkLog::class);
+    }
+
+    /**
+     * specified column for export with column manipulation
      *
      * @var array
      */
     public function exportColumns(): array
     {
-        return  [
+        return [
             'title',
             'template_id' => [
                 'name' => "Template",
@@ -91,12 +96,11 @@ class Campaign extends Model
                 }
             ],
             'created_at' => [
-                'name'     => "Initiated",
+                'name' => "Initiated",
                 "callback" => function ($item) {
                     return showDateTime($item->created_at, lang: 'en');
                 }
             ]
         ];
     }
-
 }

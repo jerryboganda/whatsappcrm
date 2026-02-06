@@ -2,36 +2,37 @@
 
 use Illuminate\Support\Facades\Route;
 
-Route::namespace('User\Auth')->name('user.')->middleware('guest')->group(function () {
-    Route::controller('LoginController')->group(function () {
-        Route::get('login', 'showLoginForm')->name('login');
-        Route::post('/login', 'login');
-        Route::get('logout', 'logout')->middleware('auth')->withoutMiddleware('guest')->name('logout');
-    });
+Route::
+        namespace('User\Auth')->name('user.')->middleware('guest')->group(function () {
+            Route::controller('LoginController')->group(function () {
+                Route::get('login', 'showLoginForm')->name('login');
+                Route::post('/login', 'login');
+                Route::get('logout', 'logout')->middleware('auth')->withoutMiddleware('guest')->name('logout');
+            });
 
-    Route::controller('RegisterController')->group(function () {
-        Route::get('register', 'showRegistrationForm')->name('register');
-        Route::post('register', 'register');
-        Route::post('check-user', 'checkUser')->name('checkUser')->withoutMiddleware('guest');
-    });
+            Route::controller('RegisterController')->group(function () {
+                Route::get('register', 'showRegistrationForm')->name('register');
+                Route::post('register', 'register');
+                Route::post('check-user', 'checkUser')->name('checkUser')->withoutMiddleware('guest');
+            });
 
-    Route::controller('ForgotPasswordController')->prefix('password')->name('password.')->group(function () {
-        Route::get('reset', 'showLinkRequestForm')->name('request');
-        Route::post('email', 'sendResetCodeEmail')->name('email');
-        Route::get('code-verify', 'codeVerify')->name('code.verify');
-        Route::post('verify-code', 'verifyCode')->name('verify.code');
-    });
+            Route::controller('ForgotPasswordController')->prefix('password')->name('password.')->group(function () {
+                Route::get('reset', 'showLinkRequestForm')->name('request');
+                Route::post('email', 'sendResetCodeEmail')->name('email');
+                Route::get('code-verify', 'codeVerify')->name('code.verify');
+                Route::post('verify-code', 'verifyCode')->name('verify.code');
+            });
 
-    Route::controller('ResetPasswordController')->group(function () {
-        Route::get('password/reset/{token}', 'showResetForm')->name('password.reset');
-        Route::post('password/reset', 'reset')->name('password.update');
-    });
+            Route::controller('ResetPasswordController')->group(function () {
+                Route::get('password/reset/{token}', 'showResetForm')->name('password.reset');
+                Route::post('password/reset', 'reset')->name('password.update');
+            });
 
-    Route::controller('SocialiteController')->group(function () {
-        Route::get('social-login/{provider}', 'socialLogin')->name('social.login');
-        Route::get('social-login/callback/{provider}', 'callback')->name('social.login.callback');
-    });
-});
+            Route::controller('SocialiteController')->group(function () {
+                Route::get('social-login/{provider}', 'socialLogin')->name('social.login');
+                Route::get('social-login/callback/{provider}', 'callback')->name('social.login.callback');
+            });
+        });
 
 Route::middleware('auth')->name('user.')->group(function () {
 
@@ -108,6 +109,7 @@ Route::middleware('auth')->name('user.')->group(function () {
                 Route::get('connect/{id}', 'whatsappAccountConnect')->name('connect');
                 Route::get('setting/{id}', 'whatsappAccountSetting')->name('setting');
                 Route::post('setting/{id}', 'whatsappAccountSettingConfirm')->name('setting.confirm');
+                Route::post('setting/commerce/{id}', 'whatsappAccountCommerceSettings')->name('setting.commerce');
             });
 
             // Whatsapp
@@ -121,11 +123,12 @@ Route::middleware('auth')->name('user.')->group(function () {
                 Route::get('conversation-list', 'conversationList')->name('conversation.list');
                 Route::get('conversation-message/{id}', 'conversationMessages')->name('conversation.message');
                 Route::post('conversation/status/{conversationId}', 'changeConversationStatus')->name('conversation.status');
+                Route::post('conversation/assign/{conversationId}', 'assignConversation')->name('conversation.assign');
                 Route::get('conversation/details/{conversationId}', 'contactDetails')->name('contact.details');
                 Route::post('note/store', 'storeNote')->name('note.store');
                 Route::post('note/delete/{id}', 'deleteNote')->name('note.delete');
 
-                Route::middleware('has.subscription', 'has.whatsapp')->group(function () {
+                Route::middleware(['has.subscription', 'has.whatsapp'])->group(function () {
                     Route::prefix('chat/message')->name('message.')->group(function () {
                         Route::post('send', 'sendMessage')->name('send')->middleware('agent.permission:send message');
                         Route::post('template/send', 'sendTemplateMessage')->name('template.send')->middleware('agent.permission:send message');
@@ -203,6 +206,13 @@ Route::middleware('auth')->name('user.')->group(function () {
                 });
             });
 
+            // Dialogflow
+            Route::controller('DialogflowController')->prefix('dialogflow')->name('dialogflow.')->group(function () {
+                Route::get('/', 'index')->name('index');
+                Route::post('store', 'store')->name('store');
+                Route::get('delete', 'delete')->name('delete');
+            });
+
             Route::controller('FlowBuilderController')->prefix('flow-builder')->name('flow.builder.')->group(function () {
                 Route::get('/', 'index')->name('index')->middleware('agent.permission:view flow builder');
                 Route::get('/create', 'create')->name('create')->middleware('agent.permission:add flow builder');
@@ -235,6 +245,8 @@ Route::middleware('auth')->name('user.')->group(function () {
 
                 Route::get('download/csv', 'downloadCsv')->name('csv.download');
                 Route::post('import', 'importContact')->name('import')->middleware(['agent.permission:add contact', 'has.subscription']);
+                Route::post('import-group', 'groupContactImport')->name('import.group')->middleware(['agent.permission:add contact', 'has.subscription']);
+                Route::post('delete-all', 'deleteContactAll')->name('delete.all')->middleware('agent.permission:delete contact');
                 Route::get('template/download', 'templateDownload')->name('template.download');
             });
 
@@ -284,11 +296,32 @@ Route::middleware('auth')->name('user.')->group(function () {
             });
 
             // Campaign
+            // Meta Ads
+            // Meta Ads
+            Route::controller('MetaAdsController')->prefix('ads')->name('ads.')->group(function () {
+                Route::get('/', 'index')->name('index');
+                Route::get('connect', 'connect')->name('connect');
+                Route::post('connect', 'storeAccount')->name('store_account');
+                Route::get('create', 'create')->name('create');
+                Route::post('store', 'storeAd')->name('store');
+            });
+
+            // Orders
+            Route::controller('OrderController')->prefix('orders')->name('orders.')->group(function () {
+                Route::get('/', 'index')->name('index');
+                Route::get('details/{id}', 'details')->name('details');
+                Route::post('status', 'statusUpdate')->name('status');
+            });
+
+            // Campaign
             Route::controller('CampaignController')->prefix('campaign')->name('campaign.')->group(function () {
-                Route::get('index', 'index')->name('index')->middleware('agent.permission:view campaign');
-                Route::get('create', 'createCampaign')->name('create')->middleware('agent.permission:add campaign');
+                Route::get('index', 'index')->name('index');
+                Route::get('create', 'createCampaign')->name('create');
+                Route::get('wizard', 'createWizard')->name('wizard');
                 Route::post('save', 'saveCampaign')->name('save')->middleware(['has.subscription', 'agent.permission:add campaign', 'has.whatsapp']);
+                Route::post('delete', 'delete')->name('delete');
                 Route::get('report/{id}', 'report')->name('report')->middleware('agent.permission:view campaign');
+                Route::get('retarget/{id}/{status}', 'retarget')->name('retarget')->middleware('agent.permission:view campaign');
             });
 
             // Purchase Plan
@@ -308,9 +341,16 @@ Route::middleware('auth')->name('user.')->group(function () {
                 Route::get('permissions/{id}', 'permissions')->name('permissions')->middleware('agent.permission:view permission');
                 Route::post('permissions/save/{id}', 'updatePermissions')->name('permissions.update')->middleware('agent.permission:assign permission');
             });
+
+            // Payment Config
+            Route::controller('PaymentConfigController')->prefix('payment')->name('payment.')->group(function () {
+                Route::get('config', 'index')->name('config');
+                Route::post('config', 'store')->name('config.store');
+                Route::post('generate-link', 'generateLink')->name('generate.link');
+            });
         });
 
-        // Payment
+        // Deposit
         Route::prefix('deposit')->name('deposit.')->middleware('parent.user')->controller('Gateway\PaymentController')->group(function () {
             Route::any('/', 'deposit')->name('index');
             Route::post('insert', 'depositInsert')->name('insert');

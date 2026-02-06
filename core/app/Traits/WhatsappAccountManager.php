@@ -16,9 +16,9 @@ trait WhatsappAccountManager
 
     public function whatsappAccounts()
     {
-        $pageTitle             = "Manage WhatsApp Account";
-        $user                  = getParentUser();
-        $view                  = 'Template::user.whatsapp.accounts';
+        $pageTitle = "Manage WhatsApp Account";
+        $user = getParentUser();
+        $view = 'Template::user.whatsapp.accounts';
         $whatsappAccountsQuery = WhatsappAccount::where('user_id', $user->id)->orderBy('is_default', 'desc');
 
         if (isApiRequest()) {
@@ -28,21 +28,21 @@ trait WhatsappAccountManager
         }
 
         return responseManager("whatsapp_accounts", $pageTitle, "success", [
-            'pageTitle'        => $pageTitle,
-            'view'             => $view,
+            'pageTitle' => $pageTitle,
+            'view' => $view,
             'whatsappAccounts' => $whatsappAccounts,
-            'accountLimit'     => featureAccessLimitCheck($user->account_limit)
+            'accountLimit' => featureAccessLimitCheck($user->account_limit)
         ]);
     }
 
     public function storeWhatsappAccount(Request $request)
     {
         $request->validate([
-            'whatsapp_number'              => 'required',
+            'whatsapp_number' => 'required',
             'whatsapp_business_account_id' => 'required',
-            'phone_number_id'              => 'required',
-            'meta_access_token'            => 'required',
-            'meta_app_id'                  => 'required',
+            'phone_number_id' => 'required',
+            'meta_access_token' => 'required',
+            'meta_app_id' => 'required',
         ]);
 
         $user = getParentUser();
@@ -76,16 +76,16 @@ trait WhatsappAccountManager
             }
         }
 
-        $whatsappAccount                               = new WhatsappAccount();
-        $whatsappAccount->user_id                      = $user->id;
-        $whatsappAccount->phone_number_id              = $whatsAccountData['id'];
-        $whatsappAccount->phone_number                 = $request->whatsapp_number;
-        $whatsappAccount->business_name                = $whatsAccountData['verified_name'];
-        $whatsappAccount->access_token                 = $request->meta_access_token;
-        $whatsappAccount->code_verification_status     = $whatsAccountData['code_verification_status'];
+        $whatsappAccount = new WhatsappAccount();
+        $whatsappAccount->user_id = $user->id;
+        $whatsappAccount->phone_number_id = $whatsAccountData['id'];
+        $whatsappAccount->phone_number = $request->whatsapp_number;
+        $whatsappAccount->business_name = $whatsAccountData['verified_name'];
+        $whatsappAccount->access_token = $request->meta_access_token;
+        $whatsappAccount->code_verification_status = $whatsAccountData['code_verification_status'];
         $whatsappAccount->whatsapp_business_account_id = $request->whatsapp_business_account_id;
-        $whatsappAccount->meta_app_id                  = $request->meta_app_id;
-        $whatsappAccount->is_default                   = WhatsappAccount::where('user_id', $user->id)->count() ? Status::NO : Status::YES;
+        $whatsappAccount->meta_app_id = $request->meta_app_id;
+        $whatsappAccount->is_default = WhatsappAccount::where('user_id', $user->id)->count() ? Status::NO : Status::YES;
         $whatsappAccount->save();
 
         decrementFeature($user, 'account_limit');
@@ -103,14 +103,14 @@ trait WhatsappAccountManager
 
     public function whatsappAccountVerificationCheck($accountId)
     {
-        $user            = getParentUser();
+        $user = getParentUser();
         $whatsappAccount = WhatsappAccount::where('user_id', $user->id)->findOrFailWithApi("whatsapp account", $accountId);
 
         try {
             $whatsappData = $this->verifyWhatsappCredentials($whatsappAccount->whatsapp_business_account_id, $whatsappAccount->access_token);
             if ($whatsappData['data']['verified_name'] && $whatsappData['data']['display_phone_number']) {
                 $whatsappAccount->business_name = $whatsappData['data']['verified_name'];
-                $whatsappAccount->phone_number  = $whatsappData['data']['display_phone_number'];
+                $whatsappAccount->phone_number = $whatsappData['data']['display_phone_number'];
                 $whatsappAccount->save();
             }
         } catch (Exception $ex) {
@@ -126,8 +126,8 @@ trait WhatsappAccountManager
 
     public function whatsappAccountConnect($id)
     {
-        $user                        = getParentUser();
-        $whatsappAccount             = WhatsappAccount::where('user_id', $user->id)->findOrFailWithApi("whatsapp account", $id);
+        $user = getParentUser();
+        $whatsappAccount = WhatsappAccount::where('user_id', $user->id)->findOrFailWithApi("whatsapp account", $id);
         $whatsappAccount->is_default = Status::YES;
         $whatsappAccount->save();
 
@@ -143,7 +143,7 @@ trait WhatsappAccountManager
             'meta_access_token' => 'required',
         ]);
 
-        $user            = getParentUser();
+        $user = getParentUser();
         $whatsappAccount = WhatsappAccount::where('user_id', $user->id)->findOrFailWithApi("whatsapp account", $accountId);
 
         try {
@@ -152,7 +152,7 @@ trait WhatsappAccountManager
             return responseManager("whatsapp_error", $ex->getMessage());
         }
 
-        $whatsappAccount->access_token             = $request->meta_access_token;
+        $whatsappAccount->access_token = $request->meta_access_token;
         $whatsappAccount->code_verification_status = $whatsappData['data']['code_verification_status'];
         $whatsappAccount->save();
 
@@ -162,9 +162,9 @@ trait WhatsappAccountManager
 
     public function embeddedSignup(Request $request)
     {
-        $validator  =  Validator::make($request->all(), [
-            'business_id'     => 'required',
-            'waba_id'         => 'required',
+        $validator = Validator::make($request->all(), [
+            'business_id' => 'required',
+            'waba_id' => 'required',
             'phone_number_id' => 'required'
         ]);
 
@@ -172,7 +172,7 @@ trait WhatsappAccountManager
             return apiResponse("error", "validation error", $validator->errors()->all(), [], 422);
         }
 
-        $user  = auth()->user();
+        $user = auth()->user();
 
         if (!featureAccessLimitCheck($user->account_limit)) {
             return apiResponse("error", "error", ["You have reached your account limit"]);
@@ -197,11 +197,11 @@ trait WhatsappAccountManager
             $isDefaultAccount = Status::YES;
         }
 
-        $whatsappAccount                               = new WhatsappAccount();
-        $whatsappAccount->user_id                      = $user->id;
+        $whatsappAccount = new WhatsappAccount();
+        $whatsappAccount->user_id = $user->id;
         $whatsappAccount->whatsapp_business_account_id = $request->waba_id;
-        $whatsappAccount->phone_number_id              = $request->phone_number_id;
-        $whatsappAccount->is_default                   = $isDefaultAccount;
+        $whatsappAccount->phone_number_id = $request->phone_number_id;
+        $whatsappAccount->is_default = $isDefaultAccount;
 
         $whatsappAccount->save();
 
@@ -222,9 +222,9 @@ trait WhatsappAccountManager
         $url = "https://graph.facebook.com/v21.0/oauth/access_token";
 
         $response = Http::get($url, [
-            'client_id'     => gs('meta_app_id'),
+            'client_id' => gs('meta_app_id'),
             'client_secret' => gs('meta_app_secret'),
-            'code'          => $request->code,
+            'code' => $request->code,
         ]);
 
         $data = $response->json();
@@ -235,7 +235,7 @@ trait WhatsappAccountManager
             $data['access_token'] = $permanentToken['access_token'];
         }
 
-        $whatsappAccount->access_token     = $data['access_token'];
+        $whatsappAccount->access_token = $data['access_token'];
 
         $this->subscribeApp($whatsappAccount->whatsapp_business_account_id, $data['access_token']);
 
@@ -256,7 +256,7 @@ trait WhatsappAccountManager
 
     private function longLivedToken($shortLivedToken)
     {
-        $url  = "https://graph.facebook.com/v20.0/oauth/access_token";
+        $url = "https://graph.facebook.com/v20.0/oauth/access_token";
         $response = Http::get($url, [
             'grant_type' => 'fb_exchange_token',
             'client_id' => gs('meta_app_id'),
@@ -301,5 +301,38 @@ trait WhatsappAccountManager
         ]);
 
         return to_route('user.whatsapp.account.verification.check', $whatsappAccount->id);
+    }
+
+    public function whatsappAccountCommerceSettings(Request $request, $accountId)
+    {
+        $request->validate([
+            'is_cart_enabled' => 'nullable|boolean',
+            'is_catalog_visible' => 'nullable|boolean'
+        ]);
+
+        $user = getParentUser();
+        $whatsappAccount = WhatsappAccount::where('user_id', $user->id)->findOrFailWithApi("whatsapp account", $accountId);
+        $whatsappLib = new \App\Lib\WhatsApp\WhatsAppLib();
+
+        try {
+            $whatsappLib->updateCommerceSettings(
+                $whatsappAccount,
+                $request->boolean('is_cart_enabled'),
+                $request->boolean('is_catalog_visible')
+            );
+
+            $whatsappAccount->is_cart_enabled = $request->boolean('is_cart_enabled');
+            $whatsappAccount->is_catalog_visible = $request->boolean('is_catalog_visible');
+            $whatsappAccount->save();
+
+            $notify[] = ['success', 'Commerce settings updated successfully'];
+        } catch (Exception $ex) {
+            $notify[] = ['error', $ex->getMessage()];
+        }
+
+        if (isApiRequest()) {
+            return apiResponse("whatsapp_commerce_settings", "success", $notify);
+        }
+        return back()->withNotify($notify);
     }
 }
