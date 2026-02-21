@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "WA Group Capture for CRM",
+  "version": "1.0.6",
+  "description": "Extract WhatsApp group members and import directly into CRM.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "tabs",
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "https://web.whatsapp.com/*",
+    "https://whatsapp.firstaidmadeeasy.com.pk/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://web.whatsapp.com/*",
+        "https://whatsapp.firstaidmadeeasy.com.pk/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

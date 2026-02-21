@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>WA Group Capture</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <main class="wrap">
+        <h1>WA Group Capture</h1>
+        <p id="statusText" class="status">Ready. Open a WhatsApp group member panel and click Scan.</p>
+
+        <div class="actions">
+            <button id="scanBtn" class="btn">Scan Members</button>
+            <button id="importBtn" class="btn btn-primary">Import to CRM</button>
+        </div>
+
+        <div class="actions">
+            <button id="copyJsonBtn" class="btn btn-light">Copy JSON</button>
+            <button id="copyCsvBtn" class="btn btn-light">Copy CSV</button>
+        </div>
+
+        <section class="meta">
+            <div><strong>Group:</strong> <span id="groupName">-</span></div>
+            <div><strong>Members:</strong> <span id="memberCount">0</span></div>
+            <div><strong>Invalid:</strong> <span id="invalidCount">0</span></div>
+            <div><strong>Duplicates:</strong> <span id="duplicateCount">0</span></div>
+            <div><strong>Config:</strong> <span id="configState">Not linked</span></div>
+        </section>
+    </main>
+
+    <script src="popup.js"></script>
+</body>
+</html>
