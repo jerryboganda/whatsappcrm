@@ -54,6 +54,16 @@
                                 placeholder="@lang('Enter your app ID')" required value="{{ old('meta_app_id') }}">
                         </div>
                     </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label class="label-two">@lang('Meta App Secret')</label>
+                            <i class="fas fa-info-circle text--info ms-1" data-toggle="tooltip" data-placement="top"
+                                title="@lang('Required for automatic token refresh. Find it in your Meta App Dashboard under Settings > Basic.')">
+                            </i>
+                            <input type="text" class="form--control form-two" name="meta_app_secret"
+                                placeholder="@lang('Enter your app secret')" required value="{{ old('meta_app_secret') }}">
+                        </div>
+                    </div>
                     <div class="col-md-12">
                         <div class="form-group">
                             <label class="label-two">@lang('Meta Access Token')</label>

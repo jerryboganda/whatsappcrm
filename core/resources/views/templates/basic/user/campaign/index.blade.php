@@ -38,6 +38,9 @@
                             <option value="{{ Status::CAMPAIGN_RUNNING }}" @selected(request()->status == Status::CAMPAIGN_RUNNING)>
                                 @lang('Running')
                             </option>
+                            <option value="{{ Status::CAMPAIGN_SETTLING }}" @selected(request()->status == Status::CAMPAIGN_SETTLING)>
+                                @lang('Settling')
+                            </option>
                             <option value="{{ Status::CAMPAIGN_SCHEDULED }}" @selected(request()->status == Status::CAMPAIGN_SCHEDULED)>
                                 @lang('Scheduled')
                             </option>
@@ -84,10 +87,10 @@
                         @forelse ($campaigns as $campaign)
                             <tr>
                                 <td>{{ __(@$campaign->title) }}</td>
-                                <td>{{ @$campaign->total_message }}</td>
-                                <td>{{ @$campaign->total_send }}</td>
-                                <td>{{ @$campaign->total_success }}</td>
-                                <td>{{ @$campaign->total_failed }}</td>
+                                <td>{{ $campaign->report_targeted ?? $campaign->total_message }}</td>
+                                <td>{{ $campaign->report_sent ?? $campaign->total_send }}</td>
+                                <td>{{ $campaign->report_delivered ?? $campaign->total_success }}</td>
+                                <td>{{ $campaign->report_failed ?? $campaign->total_failed }}</td>
                                 <td>
                                     {{ showDateTime($campaign->send_at) }}<br>{{ diffForHumans($campaign->send_at) }}
                                 </td>
@@ -127,6 +130,13 @@
             $('.filter-form').find('select').on('change', function() {
                 $('.filter-form').submit();
             });
+
+            const hasActiveCampaigns = @json((bool) ($hasActiveCampaigns ?? false));
+            if (hasActiveCampaigns) {
+                setTimeout(function() {
+                    window.location.reload();
+                }, 45000);
+            }
         })(jQuery);
     </script>
 @endpush

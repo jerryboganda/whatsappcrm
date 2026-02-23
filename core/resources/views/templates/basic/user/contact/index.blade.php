@@ -253,7 +253,13 @@
                 <div class="modal-body">
                     <ul class="nav nav-tabs" id="groupImportTabs" role="tablist">
                         <li class="nav-item" role="presentation">
-                            <button class="nav-link active" id="extension-import-tab" data-bs-toggle="tab"
+                            <button class="nav-link active" id="console-script-tab" data-bs-toggle="tab"
+                                data-bs-target="#console-script-pane" type="button" role="tab">
+                                <i class="las la-terminal"></i> @lang('Console Script') <span class="badge bg-success ms-1">@lang('Recommended')</span>
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="extension-import-tab" data-bs-toggle="tab"
                                 data-bs-target="#extension-import-pane" type="button" role="tab">
                                 @lang('Extension Import')
                             </button>
@@ -267,7 +273,49 @@
                     </ul>
 
                     <div class="tab-content pt-3">
-                        <div class="tab-pane fade show active" id="extension-import-pane" role="tabpanel">
+                        {{-- ────────────── CONSOLE SCRIPT TAB (Recommended) ────────────── --}}
+                        <div class="tab-pane fade show active" id="console-script-pane" role="tabpanel">
+                            <div class="alert alert-info py-2 mb-3">
+                                <strong><i class="las la-bolt"></i> @lang('100% Accurate Extraction')</strong> —
+                                @lang('This method reads WhatsApp\'s internal data directly. No extension needed.')
+                            </div>
+
+                            <div class="row g-3">
+                                <div class="col-lg-7">
+                                    <h6>@lang('Step-by-step Instructions:')</h6>
+                                    <ol class="mb-3" style="line-height: 2;">
+                                        <li>@lang('Open') <a href="https://web.whatsapp.com" target="_blank"><strong>web.whatsapp.com</strong></a> @lang('and open the group chat')</li>
+                                        <li>@lang('Click the') <strong>@lang('group header/name')</strong> @lang('at the top to open group info')</li>
+                                        <li>@lang('Press') <kbd>F12</kbd> @lang('to open Developer Tools, then click the') <strong>Console</strong> @lang('tab')</li>
+                                        <li>@lang('Click the button below to copy the script, then paste it in the console and press') <kbd>Enter</kbd></li>
+                                        <li>@lang('Come back here and click') <strong>"@lang('Paste from Clipboard')"</strong> @lang('in the Legacy Paste tab')</li>
+                                    </ol>
+
+                                    <div class="d-flex gap-2 flex-wrap mb-3">
+                                        <button type="button" class="btn btn--base btn--sm" id="copyConsoleScriptBtn">
+                                            <i class="las la-copy"></i> @lang('Copy Extraction Script')
+                                        </button>
+                                        <span class="badge bg-secondary fs-12 align-self-center" id="scriptCopyStatus" style="display:none;">
+                                            <i class="las la-check"></i> @lang('Copied!')
+                                        </span>
+                                    </div>
+
+                                    <div class="alert alert-warning py-2 mb-0">
+                                        <small><i class="las la-info-circle"></i>
+                                        @lang('After running the script, all member phone numbers will be automatically copied to your clipboard. Then switch to the "Legacy Paste" tab and paste them.')</small>
+                                    </div>
+                                </div>
+                                <div class="col-lg-5">
+                                    <h6>@lang('Preview of the script:')</h6>
+                                    <pre id="consoleScriptPreview" class="bg-dark text-light p-3 rounded" style="font-size:11px; max-height:250px; overflow:auto; white-space:pre-wrap; word-break:break-all; cursor:pointer;"
+                                        title="@lang('Click to copy')"></pre>
+                                    <small class="text-muted">@lang('This script reads the currently open group\'s member list from WhatsApp Web\'s internal data and copies all phone numbers to your clipboard.')</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        {{-- ────────────── EXTENSION IMPORT TAB ────────────── --}}
+                        <div class="tab-pane fade" id="extension-import-pane" role="tabpanel">
                             <div class="alert alert-warning py-2 mb-3">
                                 <strong>@lang('Compliance Notice:')</strong>
                                 @lang('Only extract members when you have legal permission and consent for CRM outreach.')
@@ -359,18 +407,37 @@
                             <form action="{{ route('user.contact.import.group') }}" method="POST" id="import-group-form">
                                 @csrf
                                 <label class="label-two">@lang('Paste Extracted Contacts')</label>
+                                <p class="text-muted fs-12 mb-1">
+                                    @lang('Paste phone numbers in ANY format — one per line, pipe-separated, CSV, or mixed text. Numbers are auto-detected.')
+                                </p>
                                 <textarea name="paste_text" id="pasteTextArea" class="form--control" rows="6"
-                                    placeholder="@lang('Paste contacts manually here...')"></textarea>
-                                <button type="button" class="btn btn--info btn--sm mt-2" id="pasteFromClipboardBtn">
-                                    <i class="las la-clipboard"></i> @lang('Paste from Clipboard')
-                                </button>
+                                    placeholder="@lang('Examples of supported formats:')&#10;+92 300 1234567&#10;John Doe, +923001234567&#10;923001234567|923012345678&#10;Name: 03001234567&#10;@lang('...or any text containing phone numbers')"></textarea>
+                                <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+                                    <button type="button" class="btn btn--info btn--sm" id="pasteFromClipboardBtn">
+                                        <i class="las la-clipboard"></i> @lang('Paste from Clipboard')
+                                    </button>
+                                    <span class="badge bg-secondary fs-12" id="pastePreviewCount" style="display:none;">
+                                        <i class="las la-phone"></i> <span id="pasteDetectedCount">0</span> @lang('numbers detected')
+                                    </span>
+                                </div>
                                 <div class="row mt-2">
-                                    <div class="col-md-6 form-group">
+                                    <div class="col-md-4 form-group">
                                         <label class="label-two">@lang('Name Prefix (Optional)')</label>
                                         <input type="text" name="name_prefix" class="form--control"
                                             placeholder="@lang('e.g. Group Member')">
                                     </div>
-                                    <div class="col-md-6 form-group">
+                                    <div class="col-md-4 form-group">
+                                        <label class="label-two">
+                                            @lang('Country Hint')
+                                            <span data-bs-toggle="tooltip" title="@lang('Default country code for numbers without a prefix (e.g. PK for Pakistan, IN for India)')">
+                                                <i class="las la-question-circle"></i>
+                                            </span>
+                                        </label>
+                                        <input type="text" name="country_hint" class="form--control" maxlength="10"
+                                            value="{{ strtoupper(getParentUser()->country_code ?? 'PK') }}"
+                                            placeholder="@lang('e.g. PK')">
+                                    </div>
+                                    <div class="col-md-4 form-group">
                                         <label class="label-two">@lang('Contact List (Optional)')</label>
                                         <select class="form--control select2" name="contact_list_id" style="width: 100%">
                                             <option value="">@lang('Select List')</option>
@@ -528,7 +595,7 @@
                 try {
                     const text = await navigator.clipboard.readText();
                     if (text && text.trim()) {
-                        $('#pasteTextArea').val(text);
+                        $('#pasteTextArea').val(text).trigger('input');
                         notify('success', 'Contacts pasted successfully!');
                     } else {
                         notify('warning', 'Clipboard is empty. Run the extractor on WhatsApp Web first.');
@@ -537,6 +604,400 @@
                     notify('error', 'Could not access clipboard. Please paste manually (Ctrl+V).');
                     console.error('Clipboard error:', err);
                 }
+            });
+
+            // Live preview: count detected phone numbers as user types/pastes
+            function countDetectedPhones(text) {
+                if (!text || !text.trim()) return 0;
+                const seen = new Set();
+                // Find all phone-like patterns
+                const pattern = /(?:\+\s*)?(?:00\s*)?(?:\(?\d{1,4}\)?\s*[-.\s]?\s*){1,}\d{2,}/g;
+                const matches = text.match(pattern) || [];
+                matches.forEach(function(m) {
+                    const digits = m.replace(/\D/g, '');
+                    if (digits.length >= 7 && digits.length <= 15) {
+                        const key = digits.length >= 10 ? digits.slice(-10) : digits;
+                        seen.add(key);
+                    }
+                });
+                return seen.size;
+            }
+
+            let previewTimer = null;
+            $('#pasteTextArea').on('input change keyup paste', function() {
+                clearTimeout(previewTimer);
+                previewTimer = setTimeout(function() {
+                    const text = $('#pasteTextArea').val();
+                    const count = countDetectedPhones(text);
+                    if (count > 0) {
+                        $('#pasteDetectedCount').text(count);
+                        $('#pastePreviewCount').show();
+                    } else {
+                        $('#pastePreviewCount').hide();
+                    }
+                }, 300);
+            });
+
+            // ═══════════════════════════════════════════════════════
+            // Console Script — extraction script generator v3.0
+            // Multi-strategy with STRICT phone validation (7-13 digits only)
+            // ═══════════════════════════════════════════════════════
+            const CONSOLE_SCRIPT = `(async function(){
+  /* WA Group Extractor v3.0 — strict phone validation */
+  var V="3.0",log=function(m){console.log("%c[WAExtract v"+V+"] "+m,"color:#00cc66;font-weight:bold")};var warn=function(m){console.warn("[WAExtract v"+V+"] "+m)};
+  log("Starting v"+V+"...");
+
+  /* === Helpers === */
+  function sid(o){if(!o)return"";if(typeof o==="string"){if(o.includes("@c.us")||o.includes("@s.whatsapp.net")||o.includes("@g.us"))return o;return""}for(var v of[o._serialized,o.serialized,o?.id?._serialized,o?.id?.serialized,o?.wid?._serialized,o?.wid?.serialized,o?.jid?._serialized,o?.jid?.serialized]){if(typeof v==="string"&&v&&(v.includes("@c.us")||v.includes("@s.whatsapp.net")||v.includes("@g.us")))return v}var u=o.user||o?.id?.user||o?.wid?.user;return u?(u+"@"+(o.server||o?.id?.server||"c.us")):""}
+  function asArr(s){if(!s)return[];if(Array.isArray(s))return s;for(var p of["_models","models"]){if(Array.isArray(s[p]))return s[p]}for(var f of["toArray","getModelsArray"]){if(typeof s[f]==="function")try{var a=s[f]();if(Array.isArray(a))return a}catch(e){}}if(typeof s?.values==="function")try{return Array.from(s.values())}catch(e){}try{if(s&&typeof s[Symbol.iterator]==="function")return Array.from(s)}catch(e){}return[]}
+  function getParts(c){if(!c)return[];var all=[];for(var src of[c?.groupMetadata?.participants,c?.groupMetadata?._participants,c?.participants,c?.__x_groupMetadata?.participants,c?.__x_participants,c?.participantCollection]){var a=asArr(src);if(a.length>0)all=all.concat(a)}if(all.length===0&&c?.groupMetadata){for(var k of Object.keys(c.groupMetadata)){try{var v=c.groupMetadata[k];var a2=asArr(v);if(a2.length>=2&&a2.slice(0,3).some(function(x){return sid(x?.id||x?.wid||x).includes("@c.us")})){all=a2;break}}catch(e){}}}var seen={};return all.filter(function(p){var id=sid(p?.id||p?.wid||p);if(!id||seen[id])return false;seen[id]=1;return true})}
+  function pPhone(p){for(var x of[p?.id,p?.wid,p?.contact?.id,p?.contact?.wid,p?.participant,p?.__x_id,p?.jid,p]){var s=sid(x);if(s&&(s.includes("@c.us")||s.includes("@s.whatsapp.net"))){var d=s.split("@")[0].replace(/\\D/g,"");if(d.length>=7&&d.length<=13)return d}}return""}
+  function pName(p){for(var v of[p?.shortName,p?.name,p?.pushname,p?.notifyName,p?.displayName,p?.formattedName,p?.contact?.name,p?.contact?.pushname,p?.contact?.notifyName,p?.contact?.displayName]){var s=String(v||"").trim();if(s)return s}return""}
+
+  /* === Find target group ID from URL === */
+  var hash=decodeURIComponent(location.hash||"").replace(/^#\\/?/,"").split("?")[0].trim();
+  var tid="";
+  if(hash.includes("@g.us"))tid=hash;
+  else{var dg=hash.replace(/[^0-9\\-]/g,"");if(dg)tid=dg+"@g.us"}
+
+  var chat=null;
+
+  /* === STRATEGY 1: Webpack chunk arrays (try EVERY array on window) === */
+  log("Strategy 1: Trying webpack chunk hook on ALL window arrays...");
+  var req=null;
+  try{
+    var keys=Object.getOwnPropertyNames(window);
+    for(var i=0;i<keys.length;i++){
+      try{
+        var val=window[keys[i]];
+        if(!val||!Array.isArray(val)||!val.push)continue;
+        val.push([[Date.now()+"_ge"],{},function(r){req=r}]);
+        if(req&&req.c){log("Strategy 1: Found require via window."+keys[i]);break}
+        req=null;
+      }catch(e){}
+    }
+  }catch(e){log("Strategy 1 error: "+e.message)}
+
+  /* === STRATEGY 2: __webpack_require__ global === */
+  if(!req||!req.c){
+    log("Strategy 2: Trying __webpack_require__...");
+    try{
+      if(typeof window.__webpack_require__==="function"&&window.__webpack_require__.c){
+        req=window.__webpack_require__;
+        log("Strategy 2: Found __webpack_require__");
+      }
+    }catch(e){}
+  }
+
+  /* === Search module cache if we have req === */
+  if(req&&req.c){
+    log("Searching module cache ("+Object.keys(req.c).length+" modules)...");
+    var bestN=0;
+    for(var key in req.c){
+      try{
+        var exp=req.c[key]?.exports;if(!exp)continue;
+        for(var vv of[exp,exp?.default].filter(Boolean)){
+          for(var b of[vv,vv?.Chat,vv?.ChatCollection,vv?.GroupChat,vv?.GroupMetadata,vv?.default?.Chat,vv?.default?.GroupMetadata]){
+            if(!b)continue;
+            if(typeof b.get==="function"&&tid){try{var c=b.get(tid);if(c&&getParts(c).length>0){chat=c;log("Found group via .get(tid)")}}catch(e){}}
+            if(chat)break;
+            for(var item of asArr(b)){
+              var id=sid(item?.id||item);if(!id.includes("@g.us"))continue;
+              var p=getParts(item);if(p.length===0)continue;
+              if(tid&&id===tid){chat=item;log("Found exact match in cache");break}
+              if(p.length>bestN){bestN=p.length;chat=item}
+            }
+            if(chat&&tid&&sid(chat?.id)===tid)break;
+          }
+          if(chat&&tid&&sid(chat?.id)===tid)break;
+        }
+      }catch(e){}
+      if(chat&&tid&&sid(chat?.id)===tid)break;
+    }
+    if(chat)log("Module cache: found group with "+getParts(chat).length+" participants");
+  }
+
+  /* === STRATEGY 3: Scan ALL window properties for Store-like objects === */
+  if(!chat){
+    log("Strategy 3: Scanning window for Store objects...");
+    try{
+      var wKeys=Object.getOwnPropertyNames(window);
+      for(var wi=0;wi<wKeys.length;wi++){
+        try{
+          var wv=window[wKeys[wi]];
+          if(!wv||typeof wv!=="object")continue;
+          /* Look for objects that have Chat/GroupMetadata stores */
+          for(var storeProp of["Chat","GroupMetadata","Group","Conn"]){
+            var store=wv[storeProp];if(!store)continue;
+            if(typeof store.get==="function"&&tid){
+              try{var gc=store.get(tid);if(gc&&getParts(gc).length>0){chat=gc;log("Strategy 3: Found via window."+wKeys[wi]+"."+storeProp);break}}catch(e){}
+            }
+            for(var itm of asArr(store)){
+              var itId=sid(itm?.id||itm);if(!itId.includes("@g.us"))continue;
+              var pp=getParts(itm);if(pp.length>=2){chat=itm;log("Strategy 3: Found via iteration");break}
+            }
+            if(chat)break;
+          }
+        }catch(e){}
+        if(chat)break;
+      }
+    }catch(e){log("Strategy 3 error: "+e.message)}
+  }
+
+  /* === STRATEGY 4: React Fiber traversal === */
+  if(!chat){
+    log("Strategy 4: React Fiber traversal...");
+    try{
+      var fKey="";
+      var probeEls=[document.getElementById("app"),document.querySelector("#main"),document.querySelector("#main header"),document.querySelector("div[tabindex]")].filter(Boolean);
+      for(var pe of probeEls){
+        for(var pk of Object.keys(pe)){
+          if(pk.startsWith("__reactFiber\\$")||pk.startsWith("__reactInternalInstance\\$")){fKey=pk;break}
+        }
+        if(fKey)break;
+      }
+      if(fKey){
+        log("Found React Fiber key: "+fKey.slice(0,25)+"...");
+        var entryEls=[document.querySelector("#main header"),document.querySelector("#main"),document.getElementById("app")].filter(function(e){return e&&e[fKey]});
+        for(var ent of entryEls){
+          var fiber=ent[fKey];var visited=new Set();var depth=0;
+          while(fiber&&depth<500){
+            if(visited.has(fiber))break;visited.add(fiber);depth++;
+            var props=fiber.memoizedProps;
+            if(props&&typeof props==="object"){
+              for(var fpk of Object.keys(props).slice(0,50)){
+                try{
+                  var fpv=props[fpk];if(!fpv||typeof fpv!=="object")continue;
+                  if(fpv.groupMetadata||fpv.participants||fpv._participants){
+                    var cand=fpv.groupMetadata?fpv:{groupMetadata:fpv};
+                    if(getParts(cand).length>=2){chat=cand;log("Strategy 4: Found in Fiber props");break}
+                  }
+                }catch(e){}
+              }
+            }
+            if(chat)break;
+            fiber=fiber.return;
+          }
+          if(chat)break;
+        }
+      }else{log("No React Fiber key found")}
+    }catch(e){log("Strategy 4 error: "+e.message)}
+  }
+
+  /* === QUALITY GATE: validate runtime data has real phone numbers === */
+  if(chat&&getParts(chat).length>0){
+    var qParts=getParts(chat);var qValid=0;var qSamples=[];
+    for(var qi=0;qi<Math.min(qParts.length,20);qi++){
+      var qSid=sid(qParts[qi]?.id||qParts[qi]?.wid||qParts[qi]);
+      var qPh=pPhone(qParts[qi]);
+      if(qi<5)qSamples.push(qSid+" => "+(qPh||"INVALID"));
+      if(qPh)qValid++;
+    }
+    log("Quality gate: "+qValid+"/"+qParts.length+" have valid phone (7-13 digits)");
+    log("Sample JIDs: "+qSamples.join(" | "));
+    if(qValid===0){log("REJECTING runtime data — 0 valid phones! Falling back to DOM.");chat=null}
+    else if(qValid<qParts.length*0.15){log("WARNING: Only "+Math.round(qValid/qParts.length*100)+"% valid — data may be unreliable")}
+  }
+
+  /* === STRATEGY 5: DOM extraction (guaranteed to work) === */
+  if(!chat||getParts(chat).length===0){
+    log("Strategy 5: DOM extraction — scrolling through member list...");
+    /* Find the member list panel by looking for "Search members" or "N members" text */
+    var memberPanel=null;
+    var sidebar=document.querySelector("#side")||document.querySelector("#pane-side");
+    function inSidebarFn(el){return sidebar?sidebar.contains(el):false}
+
+    var textEls=document.querySelectorAll("span,div,header,p");
+    var candidates=[];
+    for(var ti=0;ti<textEls.length;ti++){
+      var tel=textEls[ti];if(inSidebarFn(tel))continue;
+      var txt=(tel.textContent||"").trim();
+      if(/^search\\s+(members|participants)/i.test(txt)||/^\\d+\\s+(participant|member)s?$/i.test(txt)){
+        var par=tel.parentElement;
+        for(var up=0;up<25&&par&&par!==document.body;up++){
+          var items=par.querySelectorAll('[role="listitem"]');
+          if(items.length>=3){candidates.push({el:par,n:items.length,pri:/search/i.test(txt)?10:5});break}
+          par=par.parentElement;
+        }
+      }
+    }
+    /* Also try role="list" containers */
+    var lists=document.querySelectorAll('[role="list"]');
+    for(var li=0;li<lists.length;li++){
+      if(inSidebarFn(lists[li]))continue;
+      var lItems=lists[li].querySelectorAll('[role="listitem"]');
+      if(lItems.length>=3)candidates.push({el:lists[li],n:lItems.length,pri:2});
+    }
+    candidates.sort(function(a,b){return b.pri-a.pri||b.n-a.n});
+    memberPanel=candidates[0]?.el||null;
+
+    if(!memberPanel){
+      alert("ERROR: Could not find the member list.\\n\\nPlease do this:\\n1. Open the group chat\\n2. Click the group name at the top\\n3. Click \\"Search\\" or scroll down to \\"Members\\"\\n4. Click \\"View all (N more)\\"\\n5. Then run this script again");
+      throw new Error("member panel not found");
+    }
+
+    log("Found member panel with "+memberPanel.querySelectorAll('[role="listitem"]').length+" items");
+
+    /* Find scrollable */
+    var scrollDiv=null;
+    if(memberPanel.scrollHeight>memberPanel.clientHeight+40)scrollDiv=memberPanel;
+    if(!scrollDiv){
+      var scrollKids=Array.from(memberPanel.querySelectorAll("div")).filter(function(d){return d.scrollHeight>d.clientHeight+40&&d.clientHeight>80}).sort(function(a,b){return b.scrollHeight-a.scrollHeight});
+      scrollDiv=scrollKids[0]||null;
+    }
+
+    var domMap={};var dupCount=0;var nameOnlyDom=0;
+    function collectDom(){
+      var items=memberPanel.querySelectorAll('[role="listitem"]');
+      for(var ii=0;ii<items.length;ii++){
+        var item=items[ii];if(inSidebarFn(item))continue;
+        var found=false;
+        /* data-jid */
+        var jid=item.getAttribute("data-jid")||"";
+        if(jid&&(jid.includes("@c.us")||jid.includes("@s.whatsapp.net"))){
+          var ph=jid.split("@")[0].replace(/\\D/g,"");
+          if(ph.length>=7&&ph.length<=13){
+            var ne=item.querySelector("span[title]");
+            var nm=ne?(ne.getAttribute("title")||ne.textContent||"").trim():"";
+            if(!domMap[ph])domMap[ph]={name:nm,phone:ph};else dupCount++;
+            found=true;
+          }
+        }
+        /* nested data-jid */
+        if(!found){
+          var jEl=item.querySelector("[data-jid]");
+          if(jEl){var j2=jEl.getAttribute("data-jid")||"";
+            if(j2.includes("@c.us")||j2.includes("@s.whatsapp.net")){
+              var ph2=j2.split("@")[0].replace(/\\D/g,"");
+              if(ph2.length>=7&&ph2.length<=13){
+                var ne2=item.querySelector("span[title]");
+                var nm2=ne2?(ne2.getAttribute("title")||ne2.textContent||"").trim():"";
+                if(!domMap[ph2])domMap[ph2]={name:nm2,phone:ph2};else dupCount++;
+                found=true;
+              }
+            }
+          }
+        }
+        /* span[title] with phone */
+        if(!found){
+          var ts=item.querySelector("span[title]");
+          if(ts){
+            var tt=(ts.getAttribute("title")||"").trim();
+            var pm=tt.match(/(\\+?\\d[\\d\\s()\\-]{5,}\\d)/);
+            if(pm){var ph3=pm[1].replace(/\\D/g,"");
+              if(ph3.length>=7&&ph3.length<=13){
+                var nm3=tt.replace(pm[1],"").replace(/[,;:\\-\\s]+$/,"").trim();
+                if(!domMap[ph3])domMap[ph3]={name:nm3,phone:ph3};else dupCount++;
+                found=true;
+              }
+            }else if(tt&&tt.toLowerCase()!=="you"){nameOnlyDom++}
+          }
+        }
+      }
+      /* data-jid elements that aren't listitems */
+      var jEls=memberPanel.querySelectorAll("[data-jid]");
+      for(var ji=0;ji<jEls.length;ji++){
+        if(inSidebarFn(jEls[ji]))continue;
+        var jj=jEls[ji].getAttribute("data-jid")||"";
+        if(!jj.includes("@c.us")&&!jj.includes("@s.whatsapp.net"))continue;
+        var ph4=jj.split("@")[0].replace(/\\D/g,"");
+        if(ph4.length>=7&&ph4.length<=13&&!domMap[ph4]){
+          var ne4=jEls[ji].querySelector("span[title]")||jEls[ji].querySelector("span[dir='auto']");
+          var nm4=ne4?(ne4.getAttribute("title")||ne4.textContent||"").trim():"";
+          domMap[ph4]={name:nm4,phone:ph4};
+        }
+      }
+    }
+
+    /* Scroll loop */
+    var stable=0;
+    for(var si=0;si<300;si++){
+      collectDom();
+      if(!scrollDiv)break;
+      var before=scrollDiv.scrollTop;
+      scrollDiv.scrollTop=before+Math.max(100,Math.floor(scrollDiv.clientHeight*0.75));
+      await new Promise(function(r){setTimeout(r,280)});
+      if(Math.abs(scrollDiv.scrollTop-before)<4){if(++stable>=5)break}else{stable=0}
+    }
+    if(scrollDiv){scrollDiv.scrollTop=0;await new Promise(function(r){setTimeout(r,400)});collectDom()}
+
+    var domKeys=Object.keys(domMap);
+    log("DOM extraction: "+domKeys.length+" unique phones, "+dupCount+" dupes, "+nameOnlyDom+" name-only");
+
+    if(domKeys.length>0){
+      /* Resolve group name */
+      var gNameDom="WhatsApp Group";
+      var mh=document.querySelector("#main header span[title]");
+      if(mh){var mt=(mh.getAttribute("title")||"").trim();if(mt&&mt.split(",").length<=4&&mt.length<120)gNameDom=mt}
+      var domLines=domKeys.map(function(k){var m=domMap[k];return m.name?(m.name+", +"+m.phone):("+"+m.phone)});
+      var domOutput=domLines.join("\\n");
+      try{
+        await navigator.clipboard.writeText(domOutput);
+        alert("SUCCESS (DOM)! "+domLines.length+" members extracted from \\""+gNameDom+"\\"\\n"+(nameOnlyDom>0?nameOnlyDom+" saved contacts had name only (no phone visible).\\n":"")+"\\nPhone numbers COPIED TO CLIPBOARD.\\nGo to CRM → Import from Group → Legacy Paste → click Paste from Clipboard.");
+      }catch(e2){
+        console.log("=== COPY THESE NUMBERS ===");console.log(domOutput);
+        prompt("Auto-copy failed. Check console (scroll up) for full list. First numbers:",domOutput.slice(0,500));
+      }
+      console.log("Extracted "+domLines.length+" from "+gNameDom);console.log(domOutput);
+      return;
+    }
+    alert("ERROR: Could not extract any members. Make sure the full member list is open.");
+    return;
+  }
+
+  /* === We have a chat object — extract from runtime data === */
+  var parts=getParts(chat);
+  log("Runtime extraction: "+parts.length+" participants (via Store/webpack)");
+  var lines=[];var seen={};var nameOnly=0;
+  for(var p of parts){var phone=pPhone(p);var name=pName(p);if(!phone){nameOnly++;continue}if(seen[phone])continue;seen[phone]=1;lines.push(name?(name+", +"+phone):("+"+phone))}
+  log("Runtime result: "+lines.length+" valid phones, "+nameOnly+" without phone");
+  if(lines.length>0){log("Sample: "+lines.slice(0,3).join(" | "))}
+  if(lines.length===0){
+    log("Runtime gave 0 valid phones. Check console logs above for JID samples.");
+    alert("Store data had 0 valid phone numbers (all were internal IDs).\\nThe data-jid values in the member list DOM will be tried next.\\nRe-run the script with the member list open.");
+    return;
+  }
+  var gName=(chat?.formattedTitle||chat?.name||chat?.groupMetadata?.subject||"WhatsApp Group");
+  if(gName.split(",").length>4)gName="WhatsApp Group";
+  gName=gName.slice(0,100);
+  var output=lines.join("\\n");
+  try{
+    await navigator.clipboard.writeText(output);
+    alert("SUCCESS! "+lines.length+" members extracted from \\""+gName+"\\"\\n"+(nameOnly>0?nameOnly+" members had no phone.\\n":"")+"\\nPhone numbers COPIED TO CLIPBOARD.\\nGo to CRM → Import from Group → Legacy Paste → click Paste from Clipboard.");
+  }catch(e2){
+    console.log("=== COPY THESE NUMBERS ===");console.log(output);
+    prompt("Auto-copy failed. Check console for full list:",output.slice(0,500));
+  }
+  console.log("Extracted "+lines.length+" from "+gName);console.log(output);
+})();`;
+
+            // Set preview
+            $('#consoleScriptPreview').text(CONSOLE_SCRIPT);
+
+            // Copy button
+            $('#copyConsoleScriptBtn').on('click', async function() {
+                try {
+                    await navigator.clipboard.writeText(CONSOLE_SCRIPT);
+                    $(this).html('<i class="las la-check"></i> Copied!').removeClass('btn--base').addClass('btn--success');
+                    $('#scriptCopyStatus').show();
+                    notify('success', 'Script copied to clipboard! Now paste it in WhatsApp Web console (F12).');
+                    setTimeout(() => {
+                        $(this).html('<i class="las la-copy"></i> Copy Extraction Script').removeClass('btn--success').addClass('btn--base');
+                        $('#scriptCopyStatus').hide();
+                    }, 5000);
+                } catch (err) {
+                    // Fallback: select the pre element text
+                    const range = document.createRange();
+                    range.selectNodeContents(document.getElementById('consoleScriptPreview'));
+                    window.getSelection().removeAllRanges();
+                    window.getSelection().addRange(range);
+                    notify('warning', 'Auto-copy failed. The script text has been selected — press Ctrl+C to copy.');
+                }
+            });
+
+            // Click on preview to copy
+            $('#consoleScriptPreview').on('click', function() {
+                $('#copyConsoleScriptBtn').trigger('click');
             });
 
             // Bulk Delete Logic

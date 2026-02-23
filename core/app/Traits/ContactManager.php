@@ -201,56 +201,76 @@ trait ContactManager
     public function groupContactImport(Request $request)
     {
         $request->validate([
-            'paste_text' => 'required|string',
-            'contact_list_id' => 'nullable|exists:contact_lists,id'
+            'paste_text'      => 'required|string',
+            'contact_list_id' => 'nullable|exists:contact_lists,id',
+            'country_hint'    => 'nullable|string|max:10',
         ]);
 
         $user = getParentUser();
         $text = $request->paste_text;
+        $countryHint = strtoupper(trim($request->country_hint ?? '')) ?: 'PK';
 
-        // Enhanced Parsing Logic for Extractor Script
-        // The script returns "Item1|Item2|Item3" or "Name,Number|Name,Number"
-        // We first prioritize splitting by NEWLINE if present, then by Pipe '|'
+        /*
+         * ──────────────────────────────────────────────────────────────
+         *  UNIVERSAL PHONE EXTRACTION - handles ANY pasted format:
+         *   • Pipe-separated:  +923001234567|+923012345678
+         *   • One per line:    +92 300 1234567\n+92 301 2345678
+         *   • CSV rows:        John Doe,+923001234567
+         *   • Name + number:   John (+92 300 1234567)
+         *   • Raw digits:      923001234567
+         *   • vCard:           TEL:+923001234567
+         *   • Mixed free text with numbers embedded anywhere
+         * ──────────────────────────────────────────────────────────────
+         */
 
-        $validContacts = [];
-        $importedCount = 0;
+        $entries = $this->extractPhoneEntries($text);
+
+        $importedCount  = 0;
         $duplicateCount = 0;
+        $invalidCount   = 0;
+        $namePrefix     = $request->name_prefix ?: '';
 
-        // 1. Split into lines or chunks
-        // If the script outputs "Num|Num|Num" it's one line. If "Name|Num \n Name|Num" it's multiple.
-        $delimiters = ['|', PHP_EOL, "\r\n", "\n", ','];
+        foreach ($entries as $entry) {
+            $rawPhone = $entry['phone'];
+            $rawName  = $entry['name'];
+            $digits   = preg_replace('/\D/', '', $rawPhone);
 
-        // Initial clean up
-        $rawChunks = preg_split('/[\|\n\r]/', $text);
-
-        foreach ($rawChunks as $raw) {
-            $raw = trim($raw);
-            if (empty($raw))
-                continue;
-
-            // Try to extract Name and Number from the chunk if it looks like "Name (+123)" or "Name, +123"
-            // But the simple extractor often just gives raw numbers or "Name|Number"
-            // Let's assume the current simple script gives JUST VALID NUMBERS separated by pipes
-
-            // Clean the number (remove non-digits except +)
-            $cleanNumber = preg_replace('/[^\d]/', '', $raw);
-
-            // Check valid length
-            if (strlen($cleanNumber) < 8 || strlen($cleanNumber) > 15) {
+            // Validate digit length (international range)
+            if (strlen($digits) < 7 || strlen($digits) > 15) {
+                $invalidCount++;
                 continue;
             }
 
-            // Uniqueness check
-            if (in_array($cleanNumber, $validContacts)) {
-                continue;
+            // Try libphonenumber validation if available
+            $mobileCode    = '';
+            $nationalNumber = $digits;
+            try {
+                $util = \libphonenumber\PhoneNumberUtil::getInstance();
+                $inputForParsing = $digits;
+                if (!str_starts_with($digits, '0') && !str_starts_with($rawPhone, '+')) {
+                    $inputForParsing = '+' . $digits;
+                }
+                $parsed = $util->parse($inputForParsing, $countryHint);
+                if ($util->isValidNumber($parsed) || $util->isPossibleNumber($parsed)) {
+                    $mobileCode     = '+' . $parsed->getCountryCode();
+                    $nationalNumber = (string) $parsed->getNationalNumber();
+                    $digits         = preg_replace('/\D/', '', $util->format($parsed, \libphonenumber\PhoneNumberFormat::E164));
+                }
+            } catch (\Throwable $e) {
+                // libphonenumber not available or parse failed — keep raw digits
             }
-            $validContacts[] = $cleanNumber;
 
-            // DB check
-            $exists = Contact::where('user_id', $user->id)
-                ->where(function ($q) use ($cleanNumber) {
-                    $q->where('mobile', $cleanNumber)
-                        ->orWhereRaw("CONCAT(mobile_code, mobile) = ?", [$cleanNumber]);
+            // Broad duplicate check against CRM (multiple matching strategies)
+            $last10  = strlen($digits) >= 10 ? substr($digits, -10) : $digits;
+            $exists  = Contact::where('user_id', $user->id)
+                ->where(function ($q) use ($digits, $nationalNumber, $last10) {
+                    $q->where('mobile', $digits)
+                      ->orWhere('mobile', $nationalNumber)
+                      ->orWhere('mobile', ltrim($digits, '0'))
+                      ->orWhereRaw("REPLACE(REPLACE(CONCAT(COALESCE(mobile_code,''),COALESCE(mobile,'')), '+', ''), ' ', '') = ?", [$digits]);
+                    if (strlen($last10) >= 10) {
+                        $q->orWhere('mobile', 'LIKE', '%' . $last10);
+                    }
                 })->exists();
 
             if ($exists) {
@@ -258,30 +278,27 @@ trait ContactManager
                 continue;
             }
 
-            // Create Contact
-            $contact = new Contact();
-            $contact->user_id = $user->id;
-
-            // Try to infer a name if possible, otherwise use default
-            $namePart = preg_replace('/[\d\+\-\(\)\s]/', '', $raw); // Remove number chars
-            $namePart = trim($namePart);
-
-            if (strlen($namePart) > 2) {
-                $contact->firstname = $namePart;
-                $contact->lastname = substr($cleanNumber, -4);
-            } else {
-                if ($request->name_prefix) {
-                    $contact->firstname = $request->name_prefix;
-                    $contact->lastname = $importedCount + 1;
-                } else {
-                    $contact->firstname = "Group Member";
-                    $contact->lastname = substr($cleanNumber, -4);
-                }
+            // Feature limit check
+            if (!featureAccessLimitCheck($user->contact_limit)) {
+                break;
             }
 
-            $contact->mobile = $cleanNumber;
-            $contact->mobile_code = "";
+            // Create contact
+            $contact          = new Contact();
+            $contact->user_id = $user->id;
 
+            // Name derivation
+            if (!empty($rawName) && mb_strlen($rawName) > 1 && !preg_match('/^\d+$/', $rawName)) {
+                $nameParts          = preg_split('/\s+/', trim($rawName), 2);
+                $contact->firstname = mb_substr($nameParts[0], 0, 40);
+                $contact->lastname  = isset($nameParts[1]) ? mb_substr($nameParts[1], 0, 40) : substr($digits, -4);
+            } else {
+                $contact->firstname = $namePrefix ?: 'Group Member';
+                $contact->lastname  = substr($digits, -4);
+            }
+
+            $contact->mobile      = $nationalNumber ?: $digits;
+            $contact->mobile_code = $mobileCode;
             $contact->save();
 
             if ($request->contact_list_id) {
@@ -289,15 +306,161 @@ trait ContactManager
             }
 
             $importedCount++;
-
-            if (!featureAccessLimitCheck($user->contact_limit)) {
-                break;
-            }
             decrementFeature($user, 'contact_limit');
         }
 
-        $notify[] = ['success', "Imported $importedCount unique contacts. ($duplicateCount duplicates skipped)"];
+        $parts = ["Imported $importedCount unique contacts."];
+        if ($duplicateCount > 0) $parts[] = "$duplicateCount duplicates skipped.";
+        if ($invalidCount > 0)   $parts[] = "$invalidCount invalid numbers skipped.";
+        $notify[] = ['success', implode(' ', $parts)];
         return back()->withNotify($notify);
+    }
+
+    /**
+     * Multi-strategy phone number extraction from ANY pasted text.
+     * Returns array of ['phone' => ..., 'name' => ...] entries.
+     */
+    private function extractPhoneEntries(string $text): array
+    {
+        $entries = [];
+        $seenKeys = [];
+
+        // Normalize line endings
+        $text = str_replace(["\r\n", "\r"], "\n", $text);
+        $text = trim($text);
+
+        if (empty($text)) {
+            return [];
+        }
+
+        // ───── Strategy 1: vCard format ─────
+        if (stripos($text, 'BEGIN:VCARD') !== false) {
+            preg_match_all('/BEGIN:VCARD.*?END:VCARD/si', $text, $vCards);
+            foreach ($vCards[0] ?? [] as $vCard) {
+                $name  = '';
+                $phone = '';
+                if (preg_match('/FN[;:]([^\r\n]+)/i', $vCard, $m)) {
+                    $name = trim($m[1]);
+                }
+                if (preg_match('/TEL[^:]*:([^\r\n]+)/i', $vCard, $m)) {
+                    $phone = trim($m[1]);
+                }
+                if ($phone) {
+                    $this->addPhoneEntry($entries, $seenKeys, $phone, $name);
+                }
+            }
+        }
+
+        // ───── Strategy 2: JSON array (from extension copy) ─────
+        $trimmed = trim($text);
+        if (str_starts_with($trimmed, '[') || str_starts_with($trimmed, '{')) {
+            try {
+                $decoded = json_decode($trimmed, true);
+                if (is_array($decoded)) {
+                    $items = isset($decoded[0]) ? $decoded : [$decoded];
+                    foreach ($items as $item) {
+                        if (!is_array($item)) continue;
+                        $phone = $item['phone_raw'] ?? $item['phone'] ?? $item['mobile'] ?? '';
+                        $name  = $item['name'] ?? $item['full_name'] ?? $item['firstname'] ?? '';
+                        if ($phone) {
+                            $this->addPhoneEntry($entries, $seenKeys, $phone, $name);
+                        }
+                    }
+                }
+            } catch (\Throwable $e) {
+                // Not valid JSON — fall through to text strategies
+            }
+        }
+
+        // ───── Strategy 3: Line-by-line / chunk-by-chunk parsing ─────
+        // Split on newlines, pipes, semicolons, tabs
+        $chunks = preg_split('/[\n\|;\t]+/', $text);
+
+        foreach ($chunks as $chunk) {
+            $chunk = trim($chunk);
+            if (empty($chunk)) continue;
+
+            // Skip header-like rows
+            if (preg_match('/^(name|phone|mobile|number|contact|firstname|lastname|tel|email)[,\s:;|]/i', $chunk)) {
+                continue;
+            }
+
+            // Find ALL phone-like patterns in this chunk
+            // Pattern matches: +XX XXXXXXXXX, (0XX) XXX-XXXX, 00XXXXXXXXXXX, 0XXXXXXXXXX, XXXXXXXXXXX, etc.
+            $phonePattern = '/(?:\+\s*)?(?:00\s*)?(?:\(?\d{1,4}\)?\s*[-.\s]?\s*){1,}\d{2,}/';
+            preg_match_all($phonePattern, $chunk, $phoneMatches);
+
+            $foundPhones = [];
+            $foundRawMatches = [];
+            foreach ($phoneMatches[0] ?? [] as $rawMatch) {
+                $d = preg_replace('/\D/', '', $rawMatch);
+                if (strlen($d) >= 7 && strlen($d) <= 15) {
+                    $foundPhones[]     = $d;
+                    $foundRawMatches[] = $rawMatch;
+                }
+            }
+
+            if (empty($foundPhones)) continue;
+
+            // Extract name by removing phone parts from the chunk
+            $remaining = $chunk;
+            foreach ($foundRawMatches as $rm) {
+                $remaining = str_replace($rm, ' ', $remaining);
+            }
+            // Clean up name: remove delimiters, noise words, trim
+            $remaining = preg_replace('/[,;:\|\t\/\\\\]+/', ' ', $remaining);
+            $remaining = preg_replace('/\s+/', ' ', trim($remaining));
+            $remaining = preg_replace('/^[\s\-\.\,;:]+|[\s\-\.\,;:]+$/', '', $remaining);
+            // Remove noise-only tokens
+            if (preg_match('/^(tel|phone|mobile|cell|contact|name|number|no|num|member|\d{1,3})$/i', $remaining)) {
+                $remaining = '';
+            }
+            $namePart = mb_strlen($remaining) > 1 ? $remaining : '';
+
+            foreach ($foundPhones as $phone) {
+                $this->addPhoneEntry($entries, $seenKeys, $phone, $namePart);
+            }
+        }
+
+        // ───── Strategy 4: Global sweep for any missed phone numbers ─────
+        // Run a broad regex over the entire text to catch anything the chunk-based scan missed
+        preg_match_all('/(?:\+\s*)?(?:00)?\d[\d\s\-\.\(\)]{5,18}\d/', $text, $globalMatches);
+        foreach ($globalMatches[0] ?? [] as $gm) {
+            $d = preg_replace('/\D/', '', $gm);
+            if (strlen($d) >= 7 && strlen($d) <= 15) {
+                $this->addPhoneEntry($entries, $seenKeys, $d, '');
+            }
+        }
+
+        return $entries;
+    }
+
+    /**
+     * Add a phone entry if not already seen (deduplicates by last 10 digits).
+     */
+    private function addPhoneEntry(array &$entries, array &$seenKeys, string $phone, string $name): void
+    {
+        $digits = preg_replace('/\D/', '', $phone);
+        if (strlen($digits) < 7 || strlen($digits) > 15) {
+            return;
+        }
+
+        // Normalize: strip leading 00
+        if (str_starts_with($digits, '00') && strlen($digits) > 10) {
+            $digits = substr($digits, 2);
+        }
+
+        // Deduplicate by last 10 digits
+        $key = strlen($digits) >= 10 ? substr($digits, -10) : $digits;
+        if (isset($seenKeys[$key])) {
+            return;
+        }
+        $seenKeys[$key] = true;
+
+        $entries[] = [
+            'phone' => $digits,
+            'name'  => trim($name),
+        ];
     }
 
     public function downloadCsv()

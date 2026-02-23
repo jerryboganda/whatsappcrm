@@ -51,6 +51,8 @@ class Campaign extends Model
                 $html = '<span class="custom--badge badge badge--secondary">Initialized</span>';
             } elseif ($this->status == Status::CAMPAIGN_RUNNING) {
                 $html = '<span class="custom--badge badge badge--primary">Running</span>';
+            } elseif ($this->status == Status::CAMPAIGN_SETTLING) {
+                $html = '<span class="custom--badge badge badge--info">Settling</span>';
             } elseif ($this->status == Status::CAMPAIGN_SCHEDULED) {
                 $html = '<span class="custom--badge badge badge--warning">Scheduled</span>';
             } elseif ($this->status == Status::CAMPAIGN_COMPLETED) {

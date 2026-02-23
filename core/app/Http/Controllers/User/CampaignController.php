@@ -24,12 +24,50 @@ class CampaignController extends Controller
     {
         $user = getParentUser();
         $pageTitle = "Manage Campaign";
-        $baseQuery = Campaign::where('user_id', $user->id)->where('whatsapp_account_id', getWhatsappAccountId($user))->with('template')->searchable(['title'])->filter(['status'])->orderBy('id', 'desc');
+        $baseQuery = Campaign::where('user_id', $user->id)
+            ->where('whatsapp_account_id', getWhatsappAccountId($user))
+            ->with('template')
+            ->withCount([
+                'campaignContacts as report_targeted',
+                'campaignContacts as report_sent' => function ($query) {
+                    $query->where(function ($subQuery) {
+                        $subQuery->whereNotNull('sent_at')
+                            ->orWhereIn('delivery_status', [
+                                Status::CAMPAIGN_DELIVERY_SENT,
+                                Status::CAMPAIGN_DELIVERY_DELIVERED,
+                                Status::CAMPAIGN_DELIVERY_READ,
+                                Status::CAMPAIGN_DELIVERY_FAILED,
+                            ]);
+                    });
+                },
+                'campaignContacts as report_delivered' => function ($query) {
+                    $query->where(function ($subQuery) {
+                        $subQuery->whereNotNull('delivered_at')
+                            ->orWhereIn('delivery_status', [
+                                Status::CAMPAIGN_DELIVERY_DELIVERED,
+                                Status::CAMPAIGN_DELIVERY_READ,
+                            ]);
+                    });
+                },
+                'campaignContacts as report_failed' => function ($query) {
+                    $query->where(function ($subQuery) {
+                        $subQuery->where('status', Status::CAMPAIGN_MESSAGE_IS_FAILED)
+                            ->orWhere('delivery_status', Status::CAMPAIGN_DELIVERY_FAILED);
+                    });
+                },
+            ])
+            ->searchable(['title'])
+            ->filter(['status'])
+            ->orderBy('id', 'desc');
         if (request()->export) {
             return exportData($baseQuery, request()->export, "campaign", "A4 landscape");
         }
         $campaigns = $baseQuery->paginate(getPaginate());
-        return view('Template::user.campaign.index', compact('pageTitle', 'campaigns'));
+        $hasActiveCampaigns = $campaigns->getCollection()->contains(function ($campaign) {
+            return in_array((int) $campaign->status, [Status::CAMPAIGN_RUNNING, Status::CAMPAIGN_SETTLING, Status::CAMPAIGN_SCHEDULED], true);
+        });
+
+        return view('Template::user.campaign.index', compact('pageTitle', 'campaigns', 'hasActiveCampaigns'));
     }
 
     public function createCampaign()
@@ -259,7 +297,10 @@ class CampaignController extends Controller
         $campaign = Campaign::where('id', $id)->where('user_id', $user->id)->firstOrFail();
         [$from, $to] = $this->parseFilterDateRange($request);
 
-        if ($request->boolean('refresh_meta') && (int) ($campaign->analytics_version ?? 1) >= Status::CAMPAIGN_ANALYTICS_V2) {
+        if (
+            (int) ($campaign->analytics_version ?? 1) >= Status::CAMPAIGN_ANALYTICS_V2
+            && ($request->boolean('refresh_meta') || !$campaign->metaAnalyticsSnapshots()->exists())
+        ) {
             app(MetaCampaignAnalyticsService::class)->refreshForCampaign($campaign, $from, $to);
         }
 
@@ -483,10 +524,13 @@ class CampaignController extends Controller
     {
         $from = null;
         $to = null;
+        $timezone = $request->input('tz') ?: config('app.timezone');
 
         if ($request->filled('from')) {
             try {
-                $from = Carbon::parse($request->input('from'))->startOfDay();
+                $from = Carbon::parse($request->input('from'), $timezone)
+                    ->startOfDay()
+                    ->setTimezone(config('app.timezone'));
             } catch (Exception $e) {
                 $from = null;
             }
@@ -494,7 +538,9 @@ class CampaignController extends Controller
 
         if ($request->filled('to')) {
             try {
-                $to = Carbon::parse($request->input('to'))->endOfDay();
+                $to = Carbon::parse($request->input('to'), $timezone)
+                    ->endOfDay()
+                    ->setTimezone(config('app.timezone'));
             } catch (Exception $e) {
                 $to = null;
             }
@@ -519,4 +565,3 @@ class CampaignController extends Controller
         return ($value / $total) * 100;
     }
 }
-

@@ -1,1517 +1,769 @@
+/* ═══════════════════════════════════════════════════════════════
+   WA Group Capture — background.js  v1.3.0
+   ─────────────────────────────────────────────────────────────
+   Key fixes in 1.3.0:
+     • DOM extraction no longer excludes #main — the member panel
+       may live inside #main (center column).
+     • Member panel found by landmark text ("Search members" /
+       "N participants") then scoped precisely.
+     • Chat SIDEBAR (#side/#pane-side) is excluded (these are
+       recent-chats, NOT group members).
+     • React Fiber traversal added as extra main-world strategy.
+     • Version tag in every scan result for easy identification.
+   ═══════════════════════════════════════════════════════════════ */
+
+const EXT_VERSION = "1.3.0";
 const STORAGE_KEY = "group_extraction_session";
+
+/* ──────────────────── Message Router ──────────────────── */
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     (async () => {
-        if (message?.action === "GE_SAVE_CONFIG") {
-            await chrome.storage.local.set({ [STORAGE_KEY]: message.payload || null });
-            sendResponse({ ok: true });
-            return;
-        }
-
-        if (message?.action === "GE_GET_CONFIG") {
-            const data = await chrome.storage.local.get(STORAGE_KEY);
-            sendResponse({ ok: true, config: data[STORAGE_KEY] || null });
-            return;
-        }
-
-        if (message?.action === "GE_SIGNED_REQUEST") {
-            const result = await signedRequest(message.payload || {});
-            sendResponse(result);
-            return;
-        }
-
-        if (message?.action === "GE_SCAN_GROUP_MEMBERS") {
-            const tabId = Number(message.tabId || 0);
-            if (!tabId) {
-                sendResponse({ ok: false, error: "Missing tabId" });
-                return;
+        try {
+            switch (message?.action) {
+                case "GE_SAVE_CONFIG":
+                    await chrome.storage.local.set({ [STORAGE_KEY]: message.payload || null });
+                    sendResponse({ ok: true });
+                    break;
+                case "GE_GET_CONFIG": {
+                    const data = await chrome.storage.local.get(STORAGE_KEY);
+                    sendResponse({ ok: true, config: data[STORAGE_KEY] || null });
+                    break;
+                }
+                case "GE_SIGNED_REQUEST":
+                    sendResponse(await signedRequest(message.payload || {}));
+                    break;
+                case "GE_SCAN_GROUP_MEMBERS": {
+                    const tabId = Number(message.tabId || 0);
+                    if (!tabId) {
+                        sendResponse({ ok: false, error: "Missing tabId", _v: EXT_VERSION });
+                    } else {
+                        sendResponse(await scanGroupMembers(tabId));
+                    }
+                    break;
+                }
+                case "GE_GET_VERSION":
+                    sendResponse({ ok: true, version: EXT_VERSION });
+                    break;
+                default:
+                    sendResponse({ ok: false, error: "Unknown action" });
             }
-
-            const result = await scanGroupMembers(tabId);
-            sendResponse(result);
-            return;
+        } catch (err) {
+            sendResponse({ ok: false, error: err?.message || "Background error", _v: EXT_VERSION });
         }
-
-        sendResponse({ ok: false, error: "Unknown action" });
-    })().catch((error) => {
-        sendResponse({ ok: false, error: error?.message || "Unhandled background error" });
-    });
-
+    })();
     return true;
 });
 
-async function signedRequest(payload) {
-    const {
-        config,
-        endpoint,
-        method = "POST",
-        body = {},
-    } = payload;
+/* ──────────────────── Signed API request ──────────────────── */
 
+async function signedRequest(payload) {
+    const { config, endpoint, method = "POST", body = {} } = payload;
     if (!config?.api_base || !config?.session_token || !config?.signing_secret) {
         return { ok: false, error: "Missing extension session configuration" };
     }
-
     const url = normalizeUrl(config.api_base, endpoint || "");
-    const requestMethod = String(method || "POST").toUpperCase();
-    const bodyText = requestMethod === "GET" ? "" : JSON.stringify(body || {});
+    const rm = String(method || "POST").toUpperCase();
+    const bodyText = rm === "GET" ? "" : JSON.stringify(body || {});
     const payloadHash = await sha256Hex(bodyText);
     const timestamp = String(Math.floor(Date.now() / 1000));
     const nonce = randomToken(24);
     const path = new URL(url).pathname.replace(/^\//, "");
-    const canonical = `${requestMethod}\n${path}\n${timestamp}\n${nonce}\n${payloadHash}`;
+    const canonical = `${rm}\n${path}\n${timestamp}\n${nonce}\n${payloadHash}`;
     const signature = await hmacSha256Hex(canonical, config.signing_secret);
-
     const response = await fetch(url, {
-        method: requestMethod,
+        method: rm,
         headers: {
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${config.session_token}`,
+            Authorization: `Bearer ${config.session_token}`,
             "X-GE-Session": config.session_token,
             "X-GE-Timestamp": timestamp,
             "X-GE-Nonce": nonce,
             "X-GE-Signature": signature,
         },
-        body: requestMethod === "GET" ? undefined : bodyText,
+        body: rm === "GET" ? undefined : bodyText,
     });
-
     const rawText = await response.text();
     let parsed = null;
-    try {
-        parsed = JSON.parse(rawText);
-    } catch {
-        parsed = null;
-    }
-
-    return {
-        ok: response.ok,
-        status: response.status,
-        data: parsed,
-        raw: rawText,
-    };
+    try { parsed = JSON.parse(rawText); } catch { /* noop */ }
+    return { ok: response.ok, status: response.status, data: parsed, raw: rawText };
 }
 
+/* ══════════════════════════════════════════════════════════════
+   SCAN ORCHESTRATOR
+   ══════════════════════════════════════════════════════════════ */
+
 async function scanGroupMembers(tabId) {
-    // Run both scanners and pick the richer successful result.
-    const mainResult = await executeScriptSafe(tabId, "MAIN", extractGroupMembersMainWorld);
-    let domResult = await executeScriptSafe(tabId, "MAIN", extractGroupMembersDomFallback);
-    if (!domResult?.ok || !Array.isArray(domResult?.members) || !domResult.members.length) {
-        domResult = await executeScriptSafe(tabId, "ISOLATED", extractGroupMembersDomFallback);
+    let mainResult = null;
+    let mainError = "";
+
+    /* ---------- Strategy 1: Main-world ---------- */
+    for (let attempt = 0; attempt < 3; attempt++) {
+        if (attempt > 0) await delay(1200 + attempt * 600);
+        try {
+            const r = await execScript(tabId, "MAIN", mainWorldExtract);
+            if (r?.ok && r.members?.length > 0) {
+                if (!mainResult || r.members.length > mainResult.members.length) {
+                    mainResult = r;
+                }
+                if (r.members.length >= 10) break;
+            }
+            if (r?.error) mainError = r.error;
+        } catch (e) {
+            mainError = e?.message || "main_world_exec_failed";
+        }
     }
 
-    const mainCount = Array.isArray(mainResult?.members) ? mainResult.members.length : 0;
-    const domCount = Array.isArray(domResult?.members) ? domResult.members.length : 0;
-    const mainOk = !!mainResult?.ok;
-    const domOk = !!domResult?.ok;
-    const diagnostics = {
-        main: {
-            ok: mainOk,
-            source: mainResult?.source || "",
-            count: mainCount,
-            error: mainResult?.error || "",
-        },
-        dom: {
-            ok: domOk,
-            source: domResult?.source || "",
-            count: domCount,
-            error: domResult?.error || "",
-        },
-    };
-
-    if (mainOk && domOk) {
-        const chosen = domCount > mainCount ? domResult : mainResult;
-        return { ...chosen, diagnostics };
+    if (mainResult?.ok && mainResult.members.length >= 5) {
+        mainResult._v = EXT_VERSION;
+        mainResult._diag = { main: mainResult.members.length, dom: 0, mainErr: "" };
+        return mainResult;
     }
 
-    if (mainOk) {
-        return { ...mainResult, diagnostics };
+    /* ---------- Strategy 2: DOM fallback ---------- */
+    let domResult = null;
+    try {
+        domResult = await execScript(tabId, "MAIN", domFallbackExtract);
+    } catch (e) {
+        /* ignore */
     }
 
-    if (domOk) {
-        return { ...domResult, diagnostics };
+    const pick = (() => {
+        if (mainResult?.ok && domResult?.ok)
+            return mainResult.members.length >= domResult.members.length ? mainResult : domResult;
+        return mainResult?.ok ? mainResult : domResult?.ok ? domResult : null;
+    })();
+
+    if (pick) {
+        pick._v = EXT_VERSION;
+        pick._diag = {
+            main: mainResult?.members?.length || 0,
+            dom: domResult?.members?.length || 0,
+            mainErr: mainError,
+        };
+        return pick;
     }
 
     return {
         ok: false,
-        error: mainResult?.error || domResult?.error || "Failed to scan group members",
-        diagnostics,
+        _v: EXT_VERSION,
+        error: "Extraction failed. Please open the full member list (click group header → View all members) then scan again.",
+        _diag: { main: 0, dom: 0, mainErr: mainError },
     };
 }
 
-async function executeScriptSafe(tabId, world, func) {
+/* ──────── Helpers ──────── */
+
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function execScript(tabId, world, func) {
     try {
-        const executed = await chrome.scripting.executeScript({
+        const [frame] = await chrome.scripting.executeScript({
             target: { tabId },
             world,
             func,
         });
-
-        return executed?.[0]?.result || null;
-    } catch (error) {
-        return { ok: false, error: error?.message || "script_execution_failed" };
+        return frame?.result || null;
+    } catch (e) {
+        return { ok: false, error: e?.message || "exec_failed" };
     }
 }
 
-function extractGroupMembersMainWorld() {
-    const stats = {
-        invalid_count: 0,
-        duplicate_count: 0,
-    };
+/* ══════════════════════════════════════════════════════════════
+   STRATEGY 1 — MAIN-WORLD EXTRACTION
+   Runs in the page JS context.  Tries (in order):
+     A. Webpack require → Store → participants
+     B. React Fiber traversal → component props with participants
+     C. Global-object scan (window.*) for WA Store
+   ══════════════════════════════════════════════════════════════ */
 
-    function normalizeWhitespace(value) {
-        return String(value || "").replace(/\s+/g, " ").trim();
-    }
+function mainWorldExtract() {
+    const VERSION = "1.3.0";
+    const stats = { invalid_count: 0, duplicate_count: 0 };
+    const errors = [];
 
-    function normalizeName(value) {
-        return normalizeWhitespace(value).toLowerCase();
-    }
-
-    function cleanHash() {
-        const hash = decodeURIComponent(String(window.location.hash || ""));
-        return hash.replace(/^#\/?/, "").split("?")[0].trim();
-    }
-
-    function cleanPath() {
-        const path = decodeURIComponent(String(window.location.pathname || ""));
-        return path.replace(/^\/+/, "").split("?")[0].trim();
-    }
-
-    function normalizeGroupId(value) {
-        const val = String(value || "").trim();
-        if (!val) return "";
-        if (val.includes("@g.us")) return val;
-        const digits = val.replace(/\D+/g, "");
-        return digits ? `${digits}@g.us` : val;
-    }
-
-    function resolveRequire() {
-        const names = new Set();
-        const addName = (name) => {
-            const key = String(name || "").trim();
-            if (!key) return;
-            if (key.toLowerCase().includes("webpackchunk")) names.add(key);
-        };
-
-        Object.keys(window).forEach(addName);
-        Object.getOwnPropertyNames(window).forEach(addName);
-        Object.keys(self || {}).forEach(addName);
-        Object.getOwnPropertyNames(self || {}).forEach(addName);
-
-        addName("webpackChunkwhatsapp_web_client");
-        addName("webpackChunkbuild");
-
-        const chunkNames = Array.from(names);
-        let req = window.__webpack_require__ || window.webpackRequire || null;
-        if (req?.c) return req;
-
-        for (const key of chunkNames) {
-            const chunk = window[key] || self[key];
-            if (!Array.isArray(chunk) || typeof chunk.push !== "function") continue;
-            try {
-                chunk.push([[`ge_probe_${Date.now()}_${Math.random().toString(36).slice(2)}`], {}, (r) => { req = r; }]);
-            } catch (e) {}
-            if (req?.c) return req;
+    /* ---- helpers ---- */
+    function asArr(src) {
+        if (!src) return [];
+        if (Array.isArray(src)) return src;
+        for (const p of ["_models", "models"]) { if (Array.isArray(src[p])) return src[p]; }
+        for (const fn of ["toArray", "getModelsArray"]) {
+            if (typeof src[fn] === "function") { try { const a = src[fn](); if (Array.isArray(a)) return a; } catch {} }
         }
-        return req;
-    }
-
-    function asArray(source) {
-        if (!source) return [];
-        if (Array.isArray(source)) return source;
-        if (Array.isArray(source._models)) return source._models;
-        if (Array.isArray(source.models)) return source.models;
-        if (typeof source.toArray === "function") {
-            try {
-                const arr = source.toArray();
-                if (Array.isArray(arr)) return arr;
-            } catch (e) {}
-        }
-        if (typeof source.values === "function") {
-            try {
-                return Array.from(source.values());
-            } catch (e) {}
-        }
+        if (typeof src?.values === "function") { try { return Array.from(src.values()); } catch {} }
+        if (typeof src?.[Symbol.iterator] === "function") { try { return Array.from(src); } catch {} }
         return [];
     }
-
-    function getSerializedId(obj) {
+    function sid(obj) {
         if (!obj) return "";
         if (typeof obj === "string") return obj;
-
-        const direct = [
-            obj._serialized,
-            obj.serialized,
-            obj.id?._serialized,
-            obj.id?.serialized,
-            obj.wid?._serialized,
-            obj.wid?.serialized,
-            obj.__x_id?._serialized,
-            obj.__x_wid?._serialized,
-        ];
-
-        for (const candidate of direct) {
-            if (typeof candidate === "string" && candidate) return candidate;
+        for (const v of [obj._serialized, obj.serialized, obj.id?._serialized,
+            obj.id?.serialized, obj.wid?._serialized, obj.wid?.serialized,
+            obj.jid?._serialized, obj.jid?.serialized]) {
+            if (typeof v === "string" && v) return v;
         }
-
-        const user = obj.user || obj.id?.user || obj.wid?.user || obj.__x_id?.user;
-        const server = obj.server || obj.id?.server || obj.wid?.server || obj.__x_id?.server || "g.us";
-        return user ? `${user}@${server}` : "";
+        const u = obj.user || obj.id?.user || obj.wid?.user;
+        const s = obj.server || obj.id?.server || obj.wid?.server || "c.us";
+        return u ? `${u}@${s}` : "";
     }
-
-    function chatParticipantsDirect(chat) {
-        const sources = [
-            chat?.groupMetadata?.participants,
-            chat?.groupMetadata?._participants,
-            chat?.groupMetadata?.participantCollection,
-            chat?.groupMetadata?.members,
-            chat?.participants,
-            chat?.__x_groupMetadata?.participants,
-            chat?.__x_groupMetadata?.participantCollection,
-            chat?.__x_groupMetadata?.members,
-            chat?.__x_participants,
-        ];
-        let all = [];
-        for (const source of sources) {
-            const arr = asArray(source);
-            if (arr.length) all = all.concat(arr);
-        }
-        return all;
-    }
-
-    function hasGroupParticipants(chat) {
-        return chatParticipantsDirect(chat).length > 0;
-    }
-
-    function participantCount(chat) {
-        return chatParticipantsDirect(chat).length;
-    }
-
-    function chatParticipantsForExtraction(chat) {
-        const direct = chatParticipantsDirect(chat);
-        if (direct.length) return direct;
-
-        // Last-resort: derive participant-like ids from loaded chat object internals.
-        const fragments = collectStringFragments(chat, 5, 2200).join(" ");
-        const idTokens = collectIdTokens(fragments)
-            .filter((token) => !String(token).includes("@g.us"));
-        if (!idTokens.length) return [];
-
-        return idTokens.map((token) => ({
-            id: token,
-            contact: { id: token },
-        }));
-    }
-
-    function chatName(chat) {
-        const pools = [
-            chat?.groupMetadata?.subject,
-            chat?.formattedTitle,
-            chat?.name,
-            chat?.__x_formattedTitle,
-            chat?.__x_name,
-            chat?.contact?.name,
-        ];
-        for (const pool of pools) {
-            const value = normalizeWhitespace(pool);
-            if (value) return value.slice(0, 191);
+    function pPhone(p) {
+        for (const x of [p?.id, p?.wid, p?.contact?.id, p?.contact?.wid,
+            p?.participant, p?.participantWid, p?.__x_id, p?.__x_wid, p?.jid, p]) {
+            const s = sid(x); if (!s) continue;
+            const d = s.split("@")[0].replace(/\D/g, "");
+            if (d.length >= 8 && d.length <= 15) return d;
         }
         return "";
     }
-
-    function metadataParticipantsDirect(metadata) {
-        const sources = [
-            metadata?.participants,
-            metadata?._participants,
-            metadata?.participantCollection,
-            metadata?.members,
-            metadata?.groupMetadata?.participants,
-            metadata?.__x_participants,
-            metadata?.__x_groupMetadata?.participants,
-        ];
-        let all = [];
-        for (const source of sources) {
-            const arr = asArray(source);
-            if (arr.length) all = all.concat(arr);
+    function pName(p, phone) {
+        for (const v of [p?.shortName, p?.name, p?.pushname, p?.notifyName,
+            p?.displayName, p?.formattedName, p?.contact?.name, p?.contact?.pushname,
+            p?.contact?.notifyName, p?.contact?.displayName, p?.contact?.formattedName]) {
+            const s = String(v || "").trim();
+            if (s) return s.slice(0, 191);
         }
-        return all;
+        return phone ? `+${phone}` : "";
     }
-
-    function metadataParticipantsForExtraction(metadata) {
-        const direct = metadataParticipantsDirect(metadata);
-        if (direct.length) return direct;
-
-        const fragments = collectStringFragments(metadata, 5, 2400).join(" ");
-        const idTokens = collectIdTokens(fragments).filter((token) => !String(token).includes("@g.us"));
-        if (!idTokens.length) return [];
-        return idTokens.map((token) => ({ id: token, contact: { id: token } }));
-    }
-
-    function metadataName(metadata) {
-        const pools = [
-            metadata?.subject,
-            metadata?.name,
-            metadata?.formattedTitle,
-            metadata?.groupMetadata?.subject,
-            metadata?.__x_subject,
-            metadata?.__x_name,
-        ];
-        for (const pool of pools) {
-            const value = normalizeWhitespace(pool);
-            if (value) return value.slice(0, 191);
-        }
-        return "";
-    }
-
-    function looksLikeSubtitle(value) {
-        const text = normalizeWhitespace(value);
-        if (!text) return false;
-        return (text.match(/,/g) || []).length >= 3 || (text.match(/\+\d/g) || []).length >= 2;
-    }
-
-    function getUiGroupTitle() {
-        const selectors = [
-            "#main header [data-testid='conversation-info-header-chat-title']",
-            "#main header span[title]",
-            "header span[dir='auto'][title]",
-            "header [title]",
-        ];
-        const candidates = [];
-        for (const selector of selectors) {
-            const nodes = document.querySelectorAll(selector);
-            nodes.forEach((node) => {
-                const value = normalizeWhitespace(node.getAttribute?.("title") || node.textContent || "");
-                if (value) candidates.push(value.slice(0, 191));
-            });
-        }
-        const unique = Array.from(new Set(candidates));
-        const nonSubtitle = unique.filter((item) => !looksLikeSubtitle(item));
-        if (nonSubtitle.length) {
-            nonSubtitle.sort((a, b) => a.length - b.length);
-            return nonSubtitle[0];
-        }
-        if (unique.length) {
-            unique.sort((a, b) => a.length - b.length);
-            return unique[0];
-        }
-        return "";
-    }
-
-    function collectGroupIdHints() {
-        const regex = /(\d{8,25}@g\.us)/g;
-        const hints = new Map();
-
-        function addHint(raw, weight) {
-            const id = normalizeGroupId(raw);
-            if (!id || !id.includes("@g.us")) return;
-            const prev = hints.get(id) || 0;
-            hints.set(id, prev + weight);
-        }
-
-        const strongRoots = [
-            ...document.querySelectorAll("[aria-selected='true']"),
-            ...document.querySelectorAll("#main header"),
-            ...document.querySelectorAll("[data-testid='conversation-info-header']"),
-        ];
-
-        strongRoots.forEach((root) => {
-            const html = String(root?.outerHTML || "");
-            let match;
-            while ((match = regex.exec(html)) !== null) {
-                addHint(match[1], 8);
-            }
-            regex.lastIndex = 0;
-        });
-
-        const allNodes = document.querySelectorAll("[data-id], [data-jid], [id], a[href]");
-        for (let i = 0; i < allNodes.length && i < 2400; i += 1) {
-            const node = allNodes[i];
-            const attrs = node.getAttributeNames ? node.getAttributeNames() : [];
-            let localWeight = 1;
-            if (node.closest("[aria-selected='true']")) localWeight += 2;
-            if (node.closest("#main")) localWeight += 1;
-            for (const attr of attrs) {
-                const value = String(node.getAttribute(attr) || "");
-                let match;
-                while ((match = regex.exec(value)) !== null) {
-                    addHint(match[1], localWeight);
-                }
-                regex.lastIndex = 0;
-            }
-        }
-
-        return Array.from(hints.entries())
-            .sort((a, b) => b[1] - a[1])
-            .map((entry) => entry[0]);
-    }
-
-    function getVisibleMemberNames() {
-        const rows = document.querySelectorAll(
-            "div[role='listitem'], div[data-testid*='cell-frame-container'], div[data-testid*='cell-frame-title']"
-        );
-        const names = new Set();
-        rows.forEach((row) => {
-            const titleNode = row.querySelector("span[title], div[title]");
-            const title = normalizeWhitespace(titleNode?.getAttribute?.("title") || "");
-            if (title && !looksLikeSubtitle(title)) {
-                names.add(normalizeName(title));
-                return;
-            }
-
-            const firstLine = normalizeWhitespace(String(row.innerText || "").split("\n")[0] || "");
-            if (firstLine && !looksLikeSubtitle(firstLine) && firstLine.toLowerCase() !== "you") {
-                names.add(normalizeName(firstLine));
-            }
-        });
-        return names;
-    }
-
-    function idsMatch(serialized, wanted) {
-        if (!serialized || !wanted) return false;
-        return serialized === wanted || serialized.includes(wanted) || wanted.includes(serialized);
-    }
-
-    function candidateChatsFromStore(storeCandidate) {
-        if (!storeCandidate || typeof storeCandidate !== "object") return [];
-        const buckets = [
-            storeCandidate,
-            storeCandidate.Chat,
-            storeCandidate.default,
-            storeCandidate.default?.Chat,
-            storeCandidate.ChatCollection,
-            storeCandidate.default?.ChatCollection,
-        ];
-        const chats = [];
-        for (const bucket of buckets) {
-            if (!bucket) continue;
-            const arrays = [...asArray(bucket), ...asArray(bucket._models), ...asArray(bucket.models)];
-            arrays.forEach((item) => {
-                if (item && typeof item === "object") chats.push(item);
-            });
-            if (typeof bucket.get === "function") chats.push(bucket);
-        }
-        return chats;
-    }
-
-    function resolvePrimaryStore(req) {
-        let best = null;
-        let bestScore = -1;
-
-        const directCandidates = [
-            window.Store,
-            window.WWebJS?.Store,
-            window.Debug?.Store,
-            window?.webpackChunkwhatsapp_web_client?.Store,
-        ].filter(Boolean);
-        directCandidates.forEach((variant) => {
-            if (!variant || typeof variant !== "object") return;
-            let score = 0;
-            if (variant.Chat) score += 8;
-            if (variant.Contact || variant.Contacts || variant.ContactStore) score += 6;
-            if (variant.GroupMetadata || variant.GroupMetadataStore) score += 4;
-            if (score > bestScore) {
-                bestScore = score;
-                best = variant;
-            }
-        });
-
-        if (!req?.c) return best;
-
-        for (const key in req.c) {
-            const exp = req.c[key]?.exports;
-            if (!exp) continue;
-            const variants = [exp, exp.default].filter(Boolean);
-            for (const variant of variants) {
-                if (!variant || typeof variant !== "object") continue;
-                let score = 0;
-                if (variant.Chat) score += 8;
-                if (variant.Contact || variant.Contacts || variant.ContactStore) score += 6;
-                if (variant.GroupMetadata || variant.GroupMetadataStore) score += 3;
-                if (variant.WidFactory || variant.UserPrefs || variant.Conn) score += 2;
-                if (score > bestScore) {
-                    bestScore = score;
-                    best = variant;
-                }
-            }
-        }
-        return best;
-    }
-
-    function findChatInCollection(collection, targetIds) {
-        if (!collection) return null;
-        const wanted = Array.from(targetIds || []).filter(Boolean);
-        if (!wanted.length) return null;
-
-        const asModels = asArray(collection);
-        for (const chat of asModels) {
-            const serialized = getSerializedId(chat?.id || chat);
-            if (!serialized || !serialized.includes("@g.us")) continue;
-            if (wanted.some((id) => idsMatch(serialized, id))) return chat;
-        }
-
-        if (typeof collection.get === "function") {
-            for (const id of wanted) {
-                try {
-                    const found = collection.get(id);
-                    if (found) return found;
-                } catch (e) {}
-            }
-        }
-
-        return null;
-    }
-
-    function candidateMetadataFromStore(storeCandidate) {
-        if (!storeCandidate || typeof storeCandidate !== "object") return [];
-        const buckets = [
-            storeCandidate.GroupMetadata,
-            storeCandidate.GroupMetadataStore,
-            storeCandidate.default?.GroupMetadata,
-            storeCandidate.default?.GroupMetadataStore,
-            storeCandidate.Store?.GroupMetadata,
-            storeCandidate.Store?.GroupMetadataStore,
-            storeCandidate.default?.Store?.GroupMetadata,
-            storeCandidate.default?.Store?.GroupMetadataStore,
-        ].filter(Boolean);
-
-        const all = [];
-        buckets.forEach((bucket) => {
-            const arrays = [...asArray(bucket), ...asArray(bucket._models), ...asArray(bucket.models)];
-            arrays.forEach((item) => {
-                if (item && typeof item === "object") all.push(item);
-            });
-            if (typeof bucket.get === "function") all.push(bucket);
-        });
-        return all;
-    }
-
-    function findMetadataInCollection(collection, targetIds) {
-        if (!collection) return null;
-        const wanted = Array.from(targetIds || []).filter(Boolean);
-        if (!wanted.length) return null;
-
-        const asModels = asArray(collection);
-        for (const metadata of asModels) {
-            const serialized = getSerializedId(metadata?.id || metadata?.wid || metadata);
-            if (!serialized || !serialized.includes("@g.us")) continue;
-            if (wanted.some((id) => idsMatch(serialized, id))) return metadata;
-        }
-
-        if (typeof collection.get === "function") {
-            for (const id of wanted) {
-                try {
-                    const found = collection.get(id);
-                    if (found) return found;
-                } catch (e) {}
-            }
-        }
-        return null;
-    }
-
-    function isActiveChat(candidate) {
-        return !!(
-            candidate?.active ||
-            candidate?.isActive ||
-            candidate?.__x_active ||
-            candidate?.selected ||
-            candidate?.__x_selected
-        );
-    }
-
-    function chatNameOverlapScore(chat, visibleMemberNames) {
-        if (!visibleMemberNames || !visibleMemberNames.size) return 0;
-        const participants = chatParticipantsDirect(chat);
-        if (!participants.length) return 0;
-
-        let overlap = 0;
-        for (let i = 0; i < participants.length && overlap < 10; i += 1) {
-            const participant = participants[i];
-            const name = normalizeName(
-                participant?.shortName ||
-                participant?.name ||
-                participant?.pushname ||
-                participant?.notifyName ||
-                participant?.contact?.name ||
-                participant?.contact?.pushname ||
-                participant?.contact?.notifyName
-            );
-            if (!name) continue;
-            if (visibleMemberNames.has(name)) overlap += 1;
-        }
-        return overlap * 8;
-    }
-
-    function findGroupMetadata(req, context) {
-        const targetIds = new Set((context?.targetIds || []).map((id) => normalizeGroupId(id)).filter(Boolean));
-        const uiName = normalizeName(context?.uiTitle);
-
-        const primaryStore = resolvePrimaryStore(req);
-        const directFromStore = findMetadataInCollection(primaryStore?.GroupMetadata || primaryStore?.GroupMetadataStore, targetIds);
-        if (directFromStore) {
-            const directParticipants = metadataParticipantsDirect(directFromStore);
-            if (directParticipants.length) return directFromStore;
-        }
-
-        if (!req?.c) return null;
-
-        let best = null;
-        let bestScore = -1;
-        for (const key in req.c) {
-            const exp = req.c[key]?.exports;
-            if (!exp) continue;
-            const variants = [exp, exp.default].filter(Boolean);
-            for (const variant of variants) {
-                const candidates = candidateMetadataFromStore(variant);
-                for (const candidate of candidates) {
-                    if (!candidate || typeof candidate !== "object") continue;
-                    const serialized = getSerializedId(candidate?.id || candidate?.wid || candidate);
-                    if (!serialized || !serialized.includes("@g.us")) continue;
-
-                    const pCount = metadataParticipantsDirect(candidate).length;
-                    const name = metadataName(candidate);
-                    const nameNorm = normalizeName(name);
-                    let score = Math.min(pCount, 600) / 5;
-
-                    targetIds.forEach((targetId) => {
-                        if (targetId && idsMatch(serialized, targetId)) score += 130;
-                    });
-                    if (uiName && nameNorm) {
-                        if (uiName === nameNorm) score += 90;
-                        else if (nameNorm.includes(uiName) || uiName.includes(nameNorm)) score += 45;
-                    }
-                    if (score > bestScore) {
-                        bestScore = score;
-                        best = candidate;
-                    }
-                }
-            }
-        }
-        return best;
-    }
-
-    function findGroupChat(req, context) {
-        const targetIds = new Set((context?.targetIds || []).map((id) => normalizeGroupId(id)).filter(Boolean));
-        const uiName = normalizeName(context?.uiTitle);
-        const visibleMemberNames = context?.visibleMemberNames || new Set();
-
-        const primaryStore = resolvePrimaryStore(req);
-        const directFromStore = findChatInCollection(primaryStore?.Chat, targetIds);
-        if (directFromStore && hasGroupParticipants(directFromStore)) {
-            return directFromStore;
-        }
-
-        if (!req?.c) return null;
-
-        let best = null;
-        let bestScore = -1;
-
-        for (const key in req.c) {
-            const exp = req.c[key]?.exports;
-            if (!exp) continue;
-            const variants = [exp, exp.default].filter(Boolean);
-
-            for (const variant of variants) {
-                const candidates = candidateChatsFromStore(variant);
-                for (const candidate of candidates) {
-                    if (!candidate || !hasGroupParticipants(candidate)) continue;
-                    const serialized = getSerializedId(candidate?.id || candidate);
-                    if (!serialized.includes("@g.us")) continue;
-
-                    const name = chatName(candidate);
-                    const nameNorm = normalizeName(name);
-                    const pCount = participantCount(candidate);
-                    let score = Math.min(pCount, 600) / 5;
-
-                    if (isActiveChat(candidate)) score += 180;
-                    targetIds.forEach((targetId) => {
-                        if (targetId && idsMatch(serialized, targetId)) {
-                            score += 130;
-                        }
-                    });
-                    if (uiName && nameNorm) {
-                        if (uiName === nameNorm) score += 90;
-                        else if (nameNorm.includes(uiName) || uiName.includes(nameNorm)) score += 45;
-                    }
-                    score += chatNameOverlapScore(candidate, visibleMemberNames);
-                    if (looksLikeSubtitle(name)) score -= 35;
-
-                    if (score > bestScore) {
-                        bestScore = score;
-                        best = candidate;
-                    }
-                }
-            }
-        }
-        return best;
-    }
-
-    function collectStringFragments(obj, maxDepth = 4, maxNodes = 600) {
-        const out = [];
-        const queue = [{ value: obj, depth: 0 }];
-        const visited = new Set();
-        let count = 0;
-
-        while (queue.length && count < maxNodes) {
-            const current = queue.shift();
-            if (!current) continue;
-            const value = current.value;
-            const depth = current.depth;
-            count += 1;
-            if (value === null || value === undefined) continue;
-
-            if (typeof value === "string") {
-                out.push(value);
-                continue;
-            }
-            if (typeof value === "number") {
-                out.push(String(value));
-                continue;
-            }
-            if (typeof value !== "object" || depth >= maxDepth) {
-                continue;
-            }
-            if (visited.has(value)) continue;
-            visited.add(value);
-
-            const entries = Object.entries(value);
-            for (let i = 0; i < entries.length && i < 80; i += 1) {
-                queue.push({ value: entries[i][1], depth: depth + 1 });
-            }
-        }
-        return out;
-    }
-
-    function bestPhoneFromText(text) {
-        const value = String(text || "");
-        const candidates = [];
-        const jidRegex = /(\d{8,20})(?::\d+)?@(?:c\.us|s\.whatsapp\.net|lid)/g;
-        let jidMatch;
-        while ((jidMatch = jidRegex.exec(value)) !== null) {
-            candidates.push(jidMatch[1].replace(/\D+/g, ""));
-        }
-
-        const phoneRegex = /\+?\d[\d\s().-]{6,20}\d/g;
-        (value.match(phoneRegex) || []).forEach((item) => {
-            candidates.push(item.replace(/\D+/g, ""));
-        });
-
-        if (/^\d{8,20}$/.test(value.trim())) {
-            candidates.push(value.trim().replace(/\D+/g, ""));
-        }
-
-        const normalized = candidates
-            .map((c) => c.replace(/\D+/g, ""))
-            .filter((c) => c.length >= 8 && c.length <= 20);
-        if (!normalized.length) return "";
-
-        normalized.sort((a, b) => {
-            const aScore = a.length >= 10 && a.length <= 15 ? 2 : 1;
-            const bScore = b.length >= 10 && b.length <= 15 ? 2 : 1;
-            return bScore - aScore;
-        });
-
-        const preferred = normalized.find((n) => n.length <= 15);
-        return preferred || normalized[0] || "";
-    }
-
-    function collectIdTokens(text) {
-        const tokens = new Set();
-        const value = String(text || "");
-        const patterns = [
-            /([a-z0-9._:-]{4,120}@(?:c\.us|s\.whatsapp\.net|lid|g\.us))/gi,
-            /(\d{8,25}@g\.us)/gi,
-        ];
-        patterns.forEach((pattern) => {
-            let match;
-            while ((match = pattern.exec(value)) !== null) {
-                if (match?.[1]) tokens.add(String(match[1]).toLowerCase());
-            }
-            pattern.lastIndex = 0;
-        });
-        return Array.from(tokens);
-    }
-
-    function buildContactIndexes(req) {
-        const byName = new Map();
-        const byId = new Map();
-
-        const seenObjects = new Set();
-        let inspected = 0;
-        const maxInspect = 18000;
-
-        function addByName(name, phone) {
-            const key = normalizeName(name);
-            if (!key) return;
-            if (!byName.has(key)) byName.set(key, new Set());
-            byName.get(key).add(phone);
-        }
-
-        function addById(idToken, phone) {
-            const key = String(idToken || "").toLowerCase().trim();
-            if (!key) return;
-            if (!byId.has(key)) byId.set(key, phone);
-            const compact = key.replace(/:\d+@/, "@");
-            if (compact && !byId.has(compact)) byId.set(compact, phone);
-            const userMatch = key.match(/^([^@]+)@/);
-            if (userMatch?.[1] && !byId.has(userMatch[1])) byId.set(userMatch[1], phone);
-        }
-
-        function inspectItem(item) {
-            if (!item || typeof item !== "object") return;
-            if (seenObjects.has(item)) return;
-            seenObjects.add(item);
-            inspected += 1;
-            if (inspected > maxInspect) return;
-
-            const name = normalizeWhitespace(
-                item.name ||
-                item.pushname ||
-                item.notifyName ||
-                item.formattedName ||
-                item.shortName ||
-                item.__x_name ||
-                item.contact?.name ||
-                item.contact?.pushname
-            );
-
-            const directPhones = [
-                item?.phoneNumber,
-                item?.phone,
-                item?.pn,
-                item?.phoneNumberFormatted,
-                item?.contact?.phoneNumber,
-                item?.contact?.phone,
-                item?.contact?.pn,
-            ];
-            const textParts = [
-                getSerializedId(item),
-                getSerializedId(item?.id),
-                getSerializedId(item?.wid),
-                getSerializedId(item?.contact?.id),
-                getSerializedId(item?.contact?.wid),
-                ...directPhones,
-                ...collectStringFragments(item, 3, 220),
-            ];
-            const merged = textParts.join(" ");
-            const phone = bestPhoneFromText(merged);
-            if (!phone || phone.length > 15) return;
-
-            if (name) addByName(name, phone);
-            collectIdTokens(merged).forEach((token) => addById(token, phone));
-
-            const serialized = getSerializedId(item?.id || item);
-            if (serialized) addById(serialized, phone);
-        }
-
-        function inspectStoreCollections(primaryStore) {
-            if (!primaryStore) return;
-            const directPools = [
-                ...asArray(primaryStore?.Contact),
-                ...asArray(primaryStore?.Contacts),
-                ...asArray(primaryStore?.ContactStore),
-                ...asArray(primaryStore?.Store?.Contact),
-                ...asArray(primaryStore?.Store?.Contacts),
-                ...asArray(primaryStore?.Store?.ContactStore),
-                ...asArray(primaryStore?.default?.Contact),
-                ...asArray(primaryStore?.default?.Contacts),
-                ...asArray(primaryStore?.default?.ContactStore),
-                ...asArray(primaryStore?.Chat),
-            ];
-            directPools.forEach((item) => inspectItem(item));
-        }
-
-        inspectStoreCollections(resolvePrimaryStore(req));
-
-        if (!req?.c) return { byName, byId };
-
-        for (const key in req.c) {
-            const exp = req.c[key]?.exports;
-            if (!exp || inspected > maxInspect) continue;
-            const variants = [exp, exp.default, exp?.Store, exp?.default?.Store].filter(Boolean);
-            for (const variant of variants) {
-                if (!variant || inspected > maxInspect) continue;
-                const pools = [
-                    ...asArray(variant),
-                    ...asArray(variant?.Contact),
-                    ...asArray(variant?.Contacts),
-                    ...asArray(variant?.ContactStore),
-                    ...asArray(variant?.Store?.Contact),
-                    ...asArray(variant?.Store?.Contacts),
-                    ...asArray(variant?.Store?.ContactStore),
-                    ...asArray(variant?.default?.Contact),
-                    ...asArray(variant?.default?.Contacts),
-                    ...asArray(variant?.default?.ContactStore),
-                ];
-                pools.forEach((item) => inspectItem(item));
-            }
-        }
-        return { byName, byId };
-    }
-
-    function participantName(participant, phoneDigits) {
-        const pools = [
-            participant?.shortName,
-            participant?.name,
-            participant?.pushname,
-            participant?.notifyName,
-            participant?.contact?.name,
-            participant?.contact?.pushname,
-            participant?.contact?.notifyName,
-            participant?.contact?.formattedName,
-        ];
-        for (const pool of pools) {
-            const value = normalizeWhitespace(pool);
-            if (value) return value.slice(0, 191);
-        }
-        return phoneDigits ? `+${phoneDigits}` : "";
-    }
-
-    function participantUser(participant, contactIndexes) {
-        const byName = contactIndexes?.byName || new Map();
-        const byId = contactIndexes?.byId || new Map();
-        const directPhones = [
-            participant?.phoneNumber,
-            participant?.phone,
-            participant?.pn,
-            participant?.contact?.phoneNumber,
-            participant?.contact?.phone,
-            participant?.contact?.pn,
-        ];
-        const pools = [
-            getSerializedId(participant?.id),
-            getSerializedId(participant?.wid),
-            getSerializedId(participant?.contact?.id),
-            getSerializedId(participant?.contact?.wid),
-            getSerializedId(participant?.contact),
-            getSerializedId(participant?.participant),
-            getSerializedId(participant?.participantWid),
-            getSerializedId(participant?.__x_id),
-            getSerializedId(participant?.__x_wid),
-            ...directPhones,
-            ...collectStringFragments(participant, 4, 380),
-        ];
-        const idTokens = new Set();
-
-        for (const pool of pools) {
-            collectIdTokens(pool).forEach((token) => idTokens.add(token));
-            const best = bestPhoneFromText(pool);
-            if (best && best.length <= 15) return best;
-        }
-
-        for (const token of idTokens) {
-            const variants = [
-                token,
-                String(token || "").replace(/:\d+@/, "@"),
-                String(token || "").split("@")[0],
-            ].filter(Boolean);
-            let mapped = "";
-            for (const variant of variants) {
-                mapped = byId.get(variant) || "";
-                if (mapped) break;
-            }
-            if (mapped && mapped.length <= 15) return mapped;
-            const best = bestPhoneFromText(token);
-            if (best && best.length <= 15) return best;
-        }
-
-        const nameKey = normalizeName(participantName(participant, ""));
-        if (nameKey && byName.has(nameKey)) {
-            const set = byName.get(nameKey);
-            if (set && set.size === 1) {
-                return Array.from(set)[0];
-            }
-        }
-        return "";
-    }
-
-    function groupNameFromChat(chat, uiTitle) {
-        const pools = [uiTitle, chat?.groupMetadata?.subject, chat?.formattedTitle, chat?.name, chat?.__x_formattedTitle, chat?.__x_name];
-        for (const pool of pools) {
-            const value = normalizeWhitespace(pool);
-            if (value && !looksLikeSubtitle(value)) return value.slice(0, 191);
-        }
-        for (const pool of pools) {
-            const value = normalizeWhitespace(pool);
-            if (value) return value.slice(0, 191);
+    function gName(chat) {
+        for (const v of [chat?.formattedTitle, chat?.name, chat?.groupMetadata?.subject,
+            chat?.__x_formattedTitle, chat?.__x_name, chat?.displayName]) {
+            const s = String(v || "").trim();
+            if (s && s.split(",").length <= 4 && !(/\+\d{6,}/.test(s) && s.split(",").length > 2)) return s.slice(0, 191);
         }
         return "WhatsApp Group";
     }
-
-    function groupNameFromMetadata(metadata, uiTitle) {
-        const pools = [uiTitle, metadataName(metadata), metadata?.subject, metadata?.name, metadata?.__x_subject, metadata?.__x_name];
-        for (const pool of pools) {
-            const value = normalizeWhitespace(pool);
-            if (value && !looksLikeSubtitle(value)) return value.slice(0, 191);
+    function getParticipants(chat) {
+        let all = [];
+        for (const src of [
+            chat?.groupMetadata?.participants, chat?.groupMetadata?._participants,
+            chat?.participants, chat?.__x_groupMetadata?.participants,
+            chat?.__x_participants, chat?._groupMetadata?.participants,
+            chat?.participantCollection,
+        ]) {
+            const a = asArr(src);
+            if (a.length > 0) all = all.concat(a);
         }
-        for (const pool of pools) {
-            const value = normalizeWhitespace(pool);
-            if (value) return value.slice(0, 191);
+        // Try minified property names on groupMetadata
+        if (all.length === 0 && chat?.groupMetadata) {
+            for (const k of Object.keys(chat.groupMetadata)) {
+                try {
+                    const v = chat.groupMetadata[k]; if (!v) continue;
+                    const a = asArr(v); if (a.length < 2) continue;
+                    if (a.slice(0, 5).some(x => sid(x?.id || x?.wid || x).includes("@c.us"))) { all = a; break; }
+                } catch {}
+            }
         }
-        return "WhatsApp Group";
+        const seen = new Set();
+        return all.filter(p => { const id = sid(p?.id || p?.wid || p); if (!id || seen.has(id)) return false; seen.add(id); return true; });
     }
 
+    /* ---- Hash → target group id ---- */
+    const rawHash = decodeURIComponent(String(window.location.hash || "")).replace(/^#\/?/, "").split("?")[0].trim();
+    const targetId = (() => {
+        if (!rawHash) return "";
+        if (rawHash.includes("@g.us")) return rawHash;
+        const d = rawHash.replace(/[^0-9\-]/g, "");
+        return d ? d + "@g.us" : rawHash;
+    })();
+
+    /* ---- A. Webpack require ---- */
+    function resolveReq() {
+        let req = null;
+        for (const k of Object.keys(window)) {
+            if (!k.startsWith("webpackChunk") && k !== "webpackJsonp") continue;
+            try { const a = window[k]; if (Array.isArray(a)) a.push([[`_ge_${Date.now()}`], {}, r => { req = r; }]); } catch {}
+            if (req) return req;
+        }
+        if (typeof window.__webpack_require__ === "function" && window.__webpack_require__.c) return window.__webpack_require__;
+        // brute-force: any array with push
+        try {
+            for (const k of Object.getOwnPropertyNames(window)) {
+                try { const a = window[k]; if (Array.isArray(a) && a.push) { a.push([[`_ge2_${Date.now()}`], {}, r => { req = r; }]); if (req) return req; } } catch {}
+            }
+        } catch {}
+        return null;
+    }
+
+    function findGroupInCache(cache) {
+        let best = null, bestN = 0;
+        for (const key in cache) {
+            const exp = cache[key]?.exports; if (!exp) continue;
+            for (const v of [exp, exp?.default].filter(Boolean)) {
+                for (const b of [v, v?.Chat, v?.ChatCollection, v?.GroupMetadata,
+                    v?.GroupChat, v?.default?.Chat, v?.default?.GroupMetadata]) {
+                    if (!b) continue;
+                    if (typeof b.get === "function" && targetId) {
+                        try { const c = b.get(targetId); if (c) { const p = getParticipants(c); if (p.length > 0) return c; } } catch {}
+                    }
+                    for (const item of asArr(b)) {
+                        const id = sid(item?.id || item); if (!id.includes("@g.us")) continue;
+                        const p = getParticipants(item); if (p.length === 0) continue;
+                        if (targetId && id === targetId) return item;
+                        if (p.length > bestN) { bestN = p.length; best = item; }
+                    }
+                }
+                // Look for getActive/active patterns
+                for (const fn of ["getActive", "getActiveChat", "getSelected"]) {
+                    if (typeof v[fn] !== "function") continue;
+                    try { const c = v[fn](); if (c && sid(c?.id).includes("@g.us") && getParticipants(c).length > 0) return c; } catch {}
+                }
+                for (const prop of ["active", "activeChat", "selectedChat"]) {
+                    try { const c = v[prop]; if (c && sid(c?.id).includes("@g.us") && getParticipants(c).length > 0) return c; } catch {}
+                }
+            }
+        }
+        return best;
+    }
+
+    let chat = null;
     try {
-        const req = resolveRequire();
-        const uiTitle = getUiGroupTitle();
-        const hashId = normalizeGroupId(cleanHash());
-        const pathId = normalizeGroupId(cleanPath());
-        const domHints = collectGroupIdHints();
-        const context = {
-            uiTitle,
-            targetIds: [hashId, pathId, ...domHints].filter(Boolean),
-            visibleMemberNames: getVisibleMemberNames(),
-        };
-        const chat = findGroupChat(req, context);
-        const metadata = findGroupMetadata(req, context);
-
-        if (!chat && !metadata) {
-            return { ok: false, error: "Could not resolve active group runtime context" };
-        }
-
-        const chatParticipants = chat ? chatParticipantsForExtraction(chat) : [];
-        const metadataParticipants = metadata ? metadataParticipantsForExtraction(metadata) : [];
-        let participants = chatParticipants;
-        let chosenSource = "chat";
-        if (metadataParticipants.length > participants.length) {
-            participants = metadataParticipants;
-            chosenSource = "metadata";
-        }
-
-        const contactIndexes = buildContactIndexes(req);
-        const dedupe = new Map();
-
-        participants.forEach((participant) => {
-            const userDigits = participantUser(participant, contactIndexes);
-            if (!userDigits || userDigits.length > 15) {
-                stats.invalid_count += 1;
-                return;
-            }
-            if (dedupe.has(userDigits)) {
-                stats.duplicate_count += 1;
-                return;
-            }
-            const name = participantName(participant, userDigits);
-            dedupe.set(userDigits, { name, phone_raw: `+${userDigits}` });
-        });
-
-        const members = Array.from(dedupe.values());
-        if (!members.length) {
-            return { ok: false, error: "Runtime scan found no resolvable members" };
-        }
-
-        return {
-            ok: true,
-            source: "runtime_v3",
-            group_name: chat ? groupNameFromChat(chat, uiTitle) : groupNameFromMetadata(metadata, uiTitle),
-            group_identifier: normalizeGroupId(
-                getSerializedId(chat?.id || metadata?.id || metadata?.wid || "") || context.targetIds?.[0] || ""
-            ),
-            members,
-            total: members.length,
-            stats,
-            diagnostics: {
-                selected_source: chosenSource,
-                participant_candidates: participants.length,
-                chat_participants: chatParticipants.length,
-                metadata_participants: metadataParticipants.length,
-                contact_name_index: contactIndexes.byName?.size || 0,
-                contact_id_index: contactIndexes.byId?.size || 0,
-            },
-        };
-    } catch (error) {
-        return { ok: false, error: error?.message || "runtime_scan_failed" };
-    }
-}
-
-async function extractGroupMembersDomFallback() {
-    const stats = {
-        invalid_count: 0,
-        duplicate_count: 0,
-    };
-    const map = new Map();
-    const duplicateKeys = new Set();
-    const visitedRowKeys = new Set();
-    const orderedNames = [];
-    const containerPhoneHints = new Set();
-
-    function normalizeWhitespace(value) {
-        return String(value || "").replace(/\s+/g, " ").trim();
-    }
-
-    function looksLikeSubtitle(value) {
-        const text = normalizeWhitespace(value);
-        if (!text) return false;
-        return (text.match(/,/g) || []).length >= 3 || (text.match(/\+\d/g) || []).length >= 2;
-    }
-
-    function extractPhones(value) {
-        const text = String(value || "");
-        const found = new Set();
-
-        const jidRegex = /(\d{8,20})(?::\d+)?@(?:c\.us|s\.whatsapp\.net|lid)/g;
-        let jidMatch;
-        while ((jidMatch = jidRegex.exec(text)) !== null) {
-            found.add(jidMatch[1].replace(/\D+/g, ""));
-        }
-
-        const groupRegex = /(\d{8,25})@g\.us/g;
-        let groupMatch;
-        while ((groupMatch = groupRegex.exec(text)) !== null) {
-            // group id is not a member phone.
-            found.delete(groupMatch[1].replace(/\D+/g, ""));
-        }
-
-        const phoneRegex = /\+?\d[\d\s().-]{6,20}\d/g;
-        (text.match(phoneRegex) || []).forEach((item) => {
-            found.add(item.replace(/\D+/g, ""));
-        });
-
-        return Array.from(found).filter((digits) => digits.length >= 8 && digits.length <= 15);
-    }
-
-    function addMember(rawName, rawPhone) {
-        const phoneDigits = String(rawPhone || "").replace(/\D+/g, "");
-        if (phoneDigits.length < 8 || phoneDigits.length > 15) {
-            stats.invalid_count += 1;
-            return;
-        }
-
-        if (map.has(phoneDigits)) {
-            if (!duplicateKeys.has(phoneDigits)) {
-                duplicateKeys.add(phoneDigits);
-                stats.duplicate_count += 1;
-            }
-            return;
-        }
-
-        const cleanName = normalizeWhitespace(rawName);
-        map.set(phoneDigits, {
-            name: cleanName.slice(0, 191) || `+${phoneDigits}`,
-            phone_raw: `+${phoneDigits}`,
-        });
-    }
-
-    function rememberName(name) {
-        const clean = normalizeWhitespace(name);
-        if (!clean) return;
-        const lower = clean.toLowerCase();
-        if (lower === "you") return;
-        if (!orderedNames.some((n) => String(n).toLowerCase() === lower)) {
-            orderedNames.push(clean.slice(0, 191));
-        }
-    }
-
-    function collectReactPayload(node, maxNodes = 1800) {
-        const out = [];
-        const keys = Object.keys(node || {}).filter(
-            (key) => key.startsWith("__reactFiber$") || key.startsWith("__reactProps$")
-        );
-        const queue = [];
-        const visited = new Set();
-        keys.forEach((key) => {
-            if (node[key]) queue.push({ value: node[key], depth: 0 });
-        });
-
-        let count = 0;
-        while (queue.length && count < maxNodes) {
-            const current = queue.shift();
-            if (!current) continue;
-            const value = current.value;
-            const depth = current.depth;
-            count += 1;
-
-            if (value === null || value === undefined) continue;
-            const type = typeof value;
-            if (type === "string" || type === "number") {
-                out.push(String(value));
-                continue;
-            }
-            if (type !== "object" || depth >= 6) continue;
-            if (visited.has(value)) continue;
-            visited.add(value);
-
-            const entries = Object.entries(value);
-            for (let i = 0; i < entries.length && i < 180; i += 1) {
-                queue.push({ value: entries[i][1], depth: depth + 1 });
-            }
-        }
-        return out;
-    }
-
-    function rowName(row) {
-        const titleNode = row.querySelector("span[title], div[title]");
-        const title = normalizeWhitespace(titleNode?.getAttribute?.("title") || titleNode?.textContent || "");
-        if (title && !looksLikeSubtitle(title) && title.toLowerCase() !== "you") {
-            return title;
-        }
-
-        const text = normalizeWhitespace(String(row.innerText || ""));
-        const firstLine = normalizeWhitespace((text.split("\n")[0] || "").trim());
-        if (firstLine && firstLine.toLowerCase() !== "you" && !looksLikeSubtitle(firstLine)) {
-            return firstLine;
-        }
-        return "";
-    }
-
-    function collectRowPhones(row) {
-        const phones = new Set();
-
-        const text = normalizeWhitespace(row.innerText || "");
-        extractPhones(text).forEach((phone) => phones.add(phone));
-        extractPhones(row.outerHTML || "").forEach((phone) => phones.add(phone));
-
-        const attrs = row.getAttributeNames ? row.getAttributeNames() : [];
-        attrs.forEach((attr) => {
-            const value = row.getAttribute(attr);
-            extractPhones(value).forEach((phone) => phones.add(phone));
-        });
-
-        const descendants = row.querySelectorAll("[data-id], [data-jid], [id], [title], a[href]");
-        for (let i = 0; i < descendants.length && i < 80; i += 1) {
-            const node = descendants[i];
-            const names = node.getAttributeNames ? node.getAttributeNames() : [];
-            names.forEach((attr) => {
-                const value = node.getAttribute(attr);
-                extractPhones(value).forEach((phone) => phones.add(phone));
-            });
-        }
-
-        collectReactPayload(row).forEach((chunk) => {
-            extractPhones(chunk).forEach((phone) => phones.add(phone));
-        });
-
-        let parent = row.parentElement;
-        let hops = 0;
-        while (parent && hops < 4) {
-            const pAttrs = parent.getAttributeNames ? parent.getAttributeNames() : [];
-            pAttrs.forEach((attr) => {
-                const value = parent.getAttribute(attr);
-                extractPhones(value).forEach((phone) => phones.add(phone));
-            });
-            extractPhones(parent.outerHTML || "").forEach((phone) => phones.add(phone));
-            parent = parent.parentElement;
-            hops += 1;
-        }
-
-        return Array.from(phones);
-    }
-
-    function candidateContainers() {
-        const list = [];
-        const all = document.querySelectorAll("div");
-        for (let i = 0; i < all.length; i += 1) {
-            const el = all[i];
-            if (el.clientHeight < 180) continue;
-            if (el.scrollHeight <= el.clientHeight + 20) continue;
-
-            let score = 0;
-            const rowCount = el.querySelectorAll("div[role='listitem'], div[data-testid*='cell-frame']").length;
-            score += Math.min(rowCount * 3, 120);
-
-            const text = normalizeWhitespace(el.innerText || "");
-            if (/search members/i.test(text)) score += 70;
-            if (/search contacts/i.test(text)) score += 35;
-            if (/group admin/i.test(text)) score += 20;
-            if (el.closest("[role='dialog']")) score += 20;
-            if (el.closest("#app")) score += 5;
-
-            if (score > 10) list.push({ el, score });
-        }
-        list.sort((a, b) => b.score - a.score || b.el.scrollHeight - a.el.scrollHeight);
-        return list.map((item) => item.el);
-    }
-
-    function collectRows(container) {
-        const base = container || document;
-        const rows = base.querySelectorAll(
-            "div[role='listitem'], div[data-testid*='cell-frame-container'], div[data-testid*='cell-frame-title'], div[role='button']"
-        );
-        const uniqueRows = [];
-        const localSeen = new Set();
-        rows.forEach((row) => {
-            const root = row.closest("div[role='listitem']") || row.closest("div[data-testid*='cell-frame-container']") || row;
-            const key = String(root?.dataset?.id || root?.dataset?.jid || root?.getAttribute?.("data-id") || "") + "|" + String(root?.textContent || "").slice(0, 60);
-            if (!localSeen.has(key)) {
-                localSeen.add(key);
-                uniqueRows.push(root);
-            }
-        });
-        return uniqueRows;
-    }
-
-    function processRows(container) {
-        const rows = collectRows(container);
-        rows.forEach((row) => {
-            const rowKey = String(row?.textContent || "").slice(0, 200);
-            if (visitedRowKeys.has(rowKey)) return;
-            visitedRowKeys.add(rowKey);
-
-            const name = rowName(row);
-            rememberName(name);
-            const phones = collectRowPhones(row);
-            phones.forEach((phone) => addMember(name || `+${phone}`, phone));
-        });
-    }
-
-    function collectContainerPhones(container) {
-        if (!container) return;
-        extractPhones(container.innerHTML || "").forEach((phone) => containerPhoneHints.add(phone));
-        extractPhones(container.outerHTML || "").forEach((phone) => containerPhoneHints.add(phone));
-    }
-
-    function resolveGroupName() {
-        const selectors = [
-            "#main header [data-testid='conversation-info-header-chat-title']",
-            "#main header [data-testid='conversation-info-header-chat-title-text']",
-            "#main header h1",
-            "#main header span[title]",
-            "header span[dir='auto'][title]",
-            "aside [aria-selected='true'] span[title]",
-            "aside [aria-selected='true'] [title]",
-        ];
-        const names = [];
-        selectors.forEach((selector) => {
-            document.querySelectorAll(selector).forEach((node) => {
-                const title = normalizeWhitespace(node.getAttribute?.("title") || node.textContent || "");
-                if (title) names.push(title.slice(0, 191));
-            });
-        });
-        const preferred = names.filter((name) => {
-            const lower = String(name || "").toLowerCase();
-            if (looksLikeSubtitle(name)) return false;
-            if (lower.includes("search members")) return false;
-            if (lower.includes("search contacts")) return false;
-            if (lower.includes("open in app")) return false;
-            return true;
-        });
-        if (preferred.length) {
-            preferred.sort((a, b) => a.length - b.length);
-            return preferred[0];
-        }
-        if (names.length) {
-            names.sort((a, b) => a.length - b.length);
-            return names[0];
-        }
-        return "WhatsApp Group";
-    }
-
-    function resolveGroupIdentifier() {
-        const hash = decodeURIComponent(String(window.location.hash || "")).replace(/^#\/?/, "").split("?")[0].trim();
-        const path = decodeURIComponent(String(window.location.pathname || "")).replace(/^\/+/, "").split("?")[0].trim();
-        const joined = `${hash} ${path} ${document.body?.innerHTML?.slice(0, 6000) || ""}`;
-        const match = joined.match(/(\d{8,25}@g\.us)/);
-        if (match?.[1]) return match[1];
-        return hash || path || "";
-    }
-
-    const containers = candidateContainers();
-    const container = containers[0] || null;
-
-    if (container) {
-        container.scrollTop = 0;
-        await new Promise((resolve) => setTimeout(resolve, 140));
-    }
-
-    let stable = 0;
-    let loops = 0;
-    while (loops < 140) {
-        processRows(container);
-        collectContainerPhones(container);
-        if (!container) break;
-
-        const before = container.scrollTop;
-        const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
-        container.scrollTop = Math.min(maxTop, before + Math.max(140, Math.floor(container.clientHeight * 0.85)));
-        await new Promise((resolve) => setTimeout(resolve, 170));
-
-        if (Math.abs(container.scrollTop - before) < 4) {
-            stable += 1;
+        const req = resolveReq();
+        if (req?.c) {
+            chat = findGroupInCache(req.c);
+            if (!chat) errors.push("wp:group_not_in_cache");
         } else {
-            stable = 0;
+            errors.push("wp:require_not_found");
         }
-        if (stable >= 8) break;
-        loops += 1;
-    }
+    } catch (e) { errors.push("wp:" + (e?.message || "error")); }
 
-    if (container) {
-        container.scrollTop = 0;
-        await new Promise((resolve) => setTimeout(resolve, 120));
-        processRows(container);
-        collectContainerPhones(container);
-    } else {
-        processRows(null);
-    }
-
-    if (containerPhoneHints.size) {
-        const usedNameKeys = new Set(Array.from(map.values()).map((m) => normalizeWhitespace(m?.name || "").toLowerCase()));
-        containerPhoneHints.forEach((phone) => {
-            if (map.has(phone)) return;
-            let fallbackName = "";
-            for (let i = 0; i < orderedNames.length; i += 1) {
-                const candidate = orderedNames[i];
-                const key = normalizeWhitespace(candidate).toLowerCase();
-                if (!key || usedNameKeys.has(key)) continue;
-                fallbackName = candidate;
-                usedNameKeys.add(key);
-                break;
+    /* ---- B. React Fiber traversal ---- */
+    if (!chat) {
+        try {
+            // Find the React Fiber internals key
+            let fiberKey = "";
+            const appEl = document.getElementById("app") || document.body;
+            for (const k of Object.keys(appEl)) {
+                if (k.startsWith("__reactFiber$") || k.startsWith("__reactInternalInstance$")) { fiberKey = k; break; }
             }
-            addMember(fallbackName || `+${phone}`, phone);
-        });
+            if (!fiberKey) {
+                // try #main or first div child
+                const probe = document.querySelector("#main") || document.querySelector("#app > div") || document.querySelector("div[tabindex]");
+                if (probe) {
+                    for (const k of Object.keys(probe)) {
+                        if (k.startsWith("__reactFiber$") || k.startsWith("__reactInternalInstance$")) { fiberKey = k; break; }
+                    }
+                }
+            }
+
+            if (fiberKey) {
+                const entries = [
+                    document.querySelector("#main header"),
+                    document.querySelector("#main"),
+                    document.querySelector('[data-testid="conversation-panel-wrapper"]'),
+                    document.querySelector('[data-testid="conversation-info-header"]'),
+                    document.getElementById("app"),
+                ].filter(el => el && el[fiberKey]);
+
+                outer:
+                for (const el of entries) {
+                    let fiber = el[fiberKey];
+                    const visited = new Set();
+                    while (fiber && visited.size < 300) {
+                        if (visited.has(fiber)) break;
+                        visited.add(fiber);
+
+                        // Inspect memoizedProps
+                        const props = fiber.memoizedProps;
+                        if (props && typeof props === "object") {
+                            for (const pk of Object.keys(props).slice(0, 40)) {
+                                try {
+                                    const pv = props[pk];
+                                    if (!pv || typeof pv !== "object") continue;
+                                    if (pv.groupMetadata || pv.participants || pv._participants) {
+                                        const candidate = pv.groupMetadata ? pv : { groupMetadata: pv };
+                                        const parts = getParticipants(candidate);
+                                        if (parts.length >= 2) {
+                                            chat = candidate;
+                                            break outer;
+                                        }
+                                    }
+                                } catch {}
+                            }
+                        }
+
+                        // Inspect memoizedState chain
+                        let st = fiber.memoizedState;
+                        let stN = 0;
+                        while (st && stN < 30) {
+                            stN++;
+                            for (const sv of [st.memoizedState, st.queue?.lastRenderedState].filter(x => x && typeof x === "object")) {
+                                try {
+                                    if (sv.groupMetadata || sv.participants || sv._participants) {
+                                        const candidate = sv.groupMetadata ? sv : { groupMetadata: sv };
+                                        const parts = getParticipants(candidate);
+                                        if (parts.length >= 2) { chat = candidate; break outer; }
+                                    }
+                                } catch {}
+                            }
+                            st = st.next;
+                        }
+
+                        fiber = fiber.return;
+                    }
+                }
+                if (!chat) errors.push("rf:no_group_in_fiber");
+            } else {
+                errors.push("rf:no_fiber_key");
+            }
+        } catch (e) { errors.push("rf:" + (e?.message || "error")); }
     }
 
-    const members = Array.from(map.values());
+    /* ---- C. Global Store scan ---- */
+    if (!chat) {
+        try {
+            for (const k of Object.getOwnPropertyNames(window)) {
+                try {
+                    const v = window[k];
+                    if (!v || typeof v !== "object") continue;
+                    if (typeof v.Chat?.get === "function" || typeof v.GroupMetadata?.get === "function") {
+                        const store = v;
+                        // Try getting group from Store
+                        for (const coll of [store.Chat, store.GroupMetadata, store.Group]) {
+                            if (!coll) continue;
+                            if (typeof coll.get === "function" && targetId) {
+                                try { const c = coll.get(targetId); if (c && getParticipants(c).length > 0) { chat = c; break; } } catch {}
+                            }
+                            for (const item of asArr(coll)) {
+                                const id = sid(item?.id || item);
+                                if (!id.includes("@g.us")) continue;
+                                const p = getParticipants(item);
+                                if (p.length >= 2) { chat = item; break; }
+                            }
+                            if (chat) break;
+                        }
+                        if (chat) break;
+                    }
+                } catch {}
+            }
+            if (!chat) errors.push("gs:store_not_found");
+        } catch (e) { errors.push("gs:" + (e?.message || "error")); }
+    }
+
+    /* ---- Build result ---- */
+    if (!chat) {
+        return { ok: false, _v: VERSION, error: "main_world_failed", _errors: errors };
+    }
+
+    const participants = getParticipants(chat);
+    if (participants.length === 0) {
+        return { ok: false, _v: VERSION, error: "participants_empty", _errors: errors };
+    }
+
+    const dedupe = new Map();
+    for (const p of participants) {
+        const phone = pPhone(p);
+        if (!phone) { stats.invalid_count++; continue; }
+        if (dedupe.has(phone)) { stats.duplicate_count++; continue; }
+        dedupe.set(phone, { name: pName(p, phone), phone_raw: `+${phone}` });
+    }
+
     return {
         ok: true,
-        source: "dom_fallback_v2",
-        group_name: resolveGroupName(),
-        group_identifier: resolveGroupIdentifier(),
-        members,
-        total: members.length,
+        _v: VERSION,
+        source: "runtime",
+        group_name: gName(chat),
+        group_identifier: targetId || sid(chat?.id),
+        members: Array.from(dedupe.values()),
+        total: dedupe.size,
+        expected_count: 0,
         stats,
-        diagnostics: {
-            row_names: orderedNames.length,
-            container_phone_hints: containerPhoneHints.size,
-        },
+        _errors: errors,
     };
 }
 
+/* ══════════════════════════════════════════════════════════════
+   STRATEGY 2 — PANEL-SCOPED DOM EXTRACTION
+   ────────────────────────────────────────────────────────────
+   Runs in MAIN world so it has access to the same DOM.
+   
+   CRITICAL DIFFERENCE from v1.1 / v1.2:
+     • Does NOT exclude #main — the member list panel may live
+       inside the center column (#main area).
+     • Finds the member panel by LANDMARK TEXT ("Search members"
+       or "N participants") then scopes to that panel only.
+     • Chat sidebar (#side) is explicitly excluded.
+   ══════════════════════════════════════════════════════════════ */
+
+function domFallbackExtract() {
+    const VERSION = "1.3.0";
+    const stats = { invalid_count: 0, duplicate_count: 0, name_only_count: 0 };
+    const map = new Map();
+    const dupSet = new Set();
+
+    function addMember(rawName, rawPhone) {
+        const digits = String(rawPhone || "").replace(/\D/g, "");
+        if (digits.length < 8 || digits.length > 15) { stats.invalid_count++; return; }
+        if (map.has(digits)) {
+            if (!dupSet.has(digits)) { dupSet.add(digits); stats.duplicate_count++; }
+            return;
+        }
+        map.set(digits, {
+            name: String(rawName || "").trim().slice(0, 191) || `+${digits}`,
+            phone_raw: `+${digits}`,
+        });
+    }
+
+    /* ─── Step 1: Find the member-list panel ─── */
+
+    // The chat sidebar (left column) — we EXCLUDE this.
+    const chatSidebar = document.querySelector("#side") || document.querySelector("#pane-side");
+
+    function isInSidebar(el) {
+        return chatSidebar ? chatSidebar.contains(el) : false;
+    }
+
+    function findMemberPanel() {
+        const candidates = [];
+
+        // --- Strategy A: Find "Search members" or "N participants" header text ---
+        const textEls = document.querySelectorAll("span, div, h1, h2, h3, h4, header, p");
+        for (const el of textEls) {
+            if (isInSidebar(el)) continue;
+            const txt = (el.textContent || "").trim();
+
+            // Match "Search members" exact
+            // or "N participants" / "N members"
+            const isSearchHeader = /^search\s+(members|participants)/i.test(txt);
+            const isCountHeader = /^\d+\s+(participant|member)s?$/i.test(txt);
+
+            if (!isSearchHeader && !isCountHeader) continue;
+
+            // Walk up to find a container with role="listitem" elements
+            let parent = el.parentElement;
+            for (let i = 0; i < 25 && parent && parent !== document.body; i++) {
+                const items = parent.querySelectorAll('[role="listitem"]');
+                if (items.length >= 3) {
+                    candidates.push({ el: parent, count: items.length, priority: isSearchHeader ? 10 : 5 });
+                    break;
+                }
+                parent = parent.parentElement;
+            }
+        }
+
+        // --- Strategy B: role="list" containers (not in sidebar) ---
+        const lists = document.querySelectorAll('[role="list"]');
+        for (const list of lists) {
+            if (isInSidebar(list)) continue;
+            const items = list.querySelectorAll('[role="listitem"]');
+            if (items.length >= 3) {
+                candidates.push({ el: list, count: items.length, priority: 2 });
+            }
+        }
+
+        // --- Strategy C: Scrollable containers with data-jid listitems (not in sidebar) ---
+        if (candidates.length === 0) {
+            const divs = document.querySelectorAll("div");
+            for (const d of divs) {
+                if (isInSidebar(d)) continue;
+                if (d.scrollHeight <= d.clientHeight + 50 || d.clientHeight < 80) continue;
+                const items = d.querySelectorAll('[role="listitem"]');
+                let memberLike = 0;
+                for (const item of items) {
+                    const jid = item.getAttribute("data-jid") || "";
+                    if (jid.includes("@c.us") || jid.includes("@s.whatsapp.net")) memberLike++;
+                }
+                if (memberLike >= 3) {
+                    candidates.push({ el: d, count: memberLike, priority: 1 });
+                }
+            }
+        }
+
+        // Pick best: highest priority first, then most listitems
+        candidates.sort((a, b) => b.priority - a.priority || b.count - a.count);
+        return candidates[0]?.el || null;
+    }
+
+    const memberPanel = findMemberPanel();
+    if (!memberPanel) {
+        return {
+            ok: false,
+            _v: VERSION,
+            error: "member_panel_not_found — Open the full member list: click the group header → scroll to Members → 'View all' or 'Search members'.",
+        };
+    }
+
+    /* ─── Step 2: Parse expected count from panel header ─── */
+    let expectedCount = 0;
+    const allSpans = memberPanel.querySelectorAll("span, div, p");
+    for (const el of allSpans) {
+        const m = (el.textContent || "").trim().match(/^(\d+)\s+(participant|member)s?$/i);
+        if (m) { expectedCount = parseInt(m[1], 10); break; }
+    }
+
+    /* ─── Step 3: Find scrollable container within panel ─── */
+    function findScrollable(root) {
+        if (!root) return null;
+        // Check if root itself scrolls
+        if (root.scrollHeight > root.clientHeight + 40 && root.clientHeight > 80) return root;
+        // Check children (deepest scrollable wins — likely the actual list scroller)
+        const kids = Array.from(root.querySelectorAll("div"))
+            .filter(d => d.scrollHeight > d.clientHeight + 40 && d.clientHeight > 80)
+            .sort((a, b) => {
+                // Prefer the one with more listitems directly
+                const aItems = a.querySelectorAll(':scope > [role="listitem"]').length;
+                const bItems = b.querySelectorAll(':scope > [role="listitem"]').length;
+                return bItems - aItems || b.scrollHeight - a.scrollHeight;
+            });
+        return kids[0] || null;
+    }
+
+    const scrollable = findScrollable(memberPanel);
+
+    /* ─── Step 4: Collect members from panel ─── */
+    function collectMembers() {
+        // Method 1: role="listitem" elements within the panel
+        const items = memberPanel.querySelectorAll('[role="listitem"]');
+        for (const item of items) {
+            if (isInSidebar(item)) continue;
+
+            let found = false;
+
+            // (a) data-jid on the listitem itself
+            const jid = item.getAttribute("data-jid") || "";
+            if (jid.includes("@c.us") || jid.includes("@s.whatsapp.net")) {
+                const phone = jid.split("@")[0].replace(/\D/g, "");
+                if (phone.length >= 8 && phone.length <= 15) {
+                    const nameEl = item.querySelector("span[title]");
+                    const name = nameEl ? (nameEl.getAttribute("title") || nameEl.textContent || "").trim() : "";
+                    addMember(name, phone);
+                    found = true;
+                }
+            }
+
+            // (b) Nested element with data-jid
+            if (!found) {
+                const jidEl = item.querySelector("[data-jid]");
+                if (jidEl) {
+                    const j2 = jidEl.getAttribute("data-jid") || "";
+                    if (j2.includes("@c.us") || j2.includes("@s.whatsapp.net")) {
+                        const phone = j2.split("@")[0].replace(/\D/g, "");
+                        if (phone.length >= 8 && phone.length <= 15) {
+                            const nameEl = item.querySelector("span[title]");
+                            const name = nameEl ? (nameEl.getAttribute("title") || nameEl.textContent || "").trim() : "";
+                            addMember(name, phone);
+                            found = true;
+                        }
+                    }
+                }
+            }
+
+            // (c) span[title] with phone number pattern
+            if (!found) {
+                const titleEl = item.querySelector("span[title]");
+                if (titleEl) {
+                    const title = (titleEl.getAttribute("title") || "").trim();
+                    const phoneMatch = title.match(/(\+?\d[\d\s()\-]{5,}\d)/);
+                    if (phoneMatch) {
+                        const cleanName = title.replace(phoneMatch[1], "").replace(/[,;:\-\s]+$/, "").trim();
+                        addMember(cleanName, phoneMatch[1]);
+                        found = true;
+                    } else if (title && title.toLowerCase() !== "you") {
+                        // Saved contact — name visible but phone NOT in DOM
+                        stats.name_only_count++;
+                    }
+                }
+            }
+        }
+
+        // Method 2: data-jid elements within panel that aren't listitems
+        const jidEls = memberPanel.querySelectorAll("[data-jid]");
+        for (const el of jidEls) {
+            if (isInSidebar(el)) continue;
+            const jid = el.getAttribute("data-jid") || "";
+            if (!jid.includes("@c.us") && !jid.includes("@s.whatsapp.net")) continue;
+            const phone = jid.split("@")[0].replace(/\D/g, "");
+            if (phone.length < 8 || phone.length > 15 || map.has(phone)) continue;
+            const nameEl = el.querySelector("span[title]") || el.querySelector("span[dir='auto']");
+            const name = nameEl ? (nameEl.getAttribute("title") || nameEl.textContent || "").trim() : "";
+            addMember(name, phone);
+        }
+    }
+
+    /* ─── Step 5: Scroll through the member list ─── */
+    async function scrollAndCollect() {
+        let stableCount = 0;
+        for (let i = 0; i < 300; i++) {
+            collectMembers();
+            if (!scrollable) break;
+
+            const before = scrollable.scrollTop;
+            scrollable.scrollTop = before + Math.max(100, Math.floor(scrollable.clientHeight * 0.75));
+            await new Promise(r => setTimeout(r, 280));
+
+            if (Math.abs(scrollable.scrollTop - before) < 4) {
+                if (++stableCount >= 5) break;
+            } else {
+                stableCount = 0;
+            }
+        }
+
+        // Final pass: scroll to top and collect any initially visible items
+        if (scrollable) {
+            scrollable.scrollTop = 0;
+            await new Promise(r => setTimeout(r, 400));
+            collectMembers();
+        }
+    }
+
+    // This function is async, so we return a Promise
+    return (async () => {
+        await scrollAndCollect();
+
+        /* ─── Step 6: Group name ─── */
+        function resolveGroupName() {
+            // 1) Main header (most reliable for group name)
+            const mainHeader = document.querySelector("#main header span[title]");
+            if (mainHeader) {
+                const t = (mainHeader.getAttribute("title") || "").trim();
+                if (t && t.split(",").length <= 4 && t.length < 120) return t.slice(0, 191);
+            }
+            // 2) Conversation info header
+            const infoHeader = document.querySelector('[data-testid="conversation-info-header"] span[title]');
+            if (infoHeader) {
+                const t = (infoHeader.getAttribute("title") || "").trim();
+                if (t && t.split(",").length <= 4 && t.length < 120) return t.slice(0, 191);
+            }
+            // 3) Any header span outside the member panel
+            const headers = document.querySelectorAll("header span[title]");
+            for (const h of headers) {
+                if (memberPanel.contains(h)) continue;
+                const t = (h.getAttribute("title") || "").trim();
+                if (t && t.split(",").length <= 4 && t.length < 120 && t.length > 2) return t.slice(0, 191);
+            }
+            return "WhatsApp Group";
+        }
+
+        const members = Array.from(map.values());
+        return {
+            ok: true,
+            _v: VERSION,
+            source: "dom",
+            group_name: resolveGroupName(),
+            group_identifier: decodeURIComponent(String(window.location.hash || "")).replace(/^#\/?/, "").split("?")[0],
+            members,
+            total: members.length,
+            expected_count: expectedCount,
+            stats,
+        };
+    })();
+}
+
+/* ────────────────────────────────────────────
+   Crypto / URL Utilities
+   ──────────────────────────────────────────── */
+
 function normalizeUrl(base, endpoint) {
-    const cleanBase = String(base || "").replace(/\/+$/, "");
-    const cleanEndpoint = String(endpoint || "").replace(/^\/+/, "");
-    if (!cleanEndpoint) {
-        return cleanBase;
-    }
-    return `${cleanBase}/${cleanEndpoint}`;
+    return String(base || "").replace(/\/+$/, "") + (endpoint ? "/" + String(endpoint).replace(/^\/+/, "") : "");
 }
-
-function randomToken(length) {
-    const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    let out = "";
-    const bytes = crypto.getRandomValues(new Uint8Array(length));
-    for (let i = 0; i < bytes.length; i += 1) {
-        out += chars[bytes[i] % chars.length];
-    }
-    return out;
+function randomToken(n) {
+    const c = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    return Array.from(crypto.getRandomValues(new Uint8Array(n)), b => c[b % c.length]).join("");
 }
-
-async function sha256Hex(value) {
-    const enc = new TextEncoder().encode(value);
-    const digest = await crypto.subtle.digest("SHA-256", enc);
-    return bytesToHex(new Uint8Array(digest));
+async function sha256Hex(v) {
+    return bytesToHex(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(v))));
 }
-
-async function hmacSha256Hex(value, secret) {
-    const enc = new TextEncoder();
-    const key = await crypto.subtle.importKey(
-        "raw",
-        enc.encode(secret),
-        { name: "HMAC", hash: "SHA-256" },
-        false,
-        ["sign"]
-    );
-    const sig = await crypto.subtle.sign("HMAC", key, enc.encode(value));
-    return bytesToHex(new Uint8Array(sig));
+async function hmacSha256Hex(v, s) {
+    const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(s), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    return bytesToHex(new Uint8Array(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(v))));
 }
-
-function bytesToHex(bytes) {
-    return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
+function bytesToHex(b) { return Array.from(b, x => x.toString(16).padStart(2, "0")).join(""); }

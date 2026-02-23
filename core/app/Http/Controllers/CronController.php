@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Constants\Status;
 use App\Http\Controllers\User\PurchasePlanController;
 use App\Lib\CurlRequest;
+use App\Models\Campaign;
 use App\Models\CampaignContact;
 use App\Models\CampaignMessageEvent;
 use App\Models\Conversation;
@@ -15,7 +16,12 @@ use App\Models\FlowNodeMedia;
 use App\Models\GroupExtractionJob;
 use App\Models\Message;
 use App\Models\PlanPurchase;
+use App\Models\WhatsappAccount;
+use App\Lib\WhatsApp\WhatsAppLib;
+use App\Services\CampaignLifecycleService;
 use App\Services\GroupExtraction\GroupExtractionProcessorService;
+use App\Services\MetaWebhookSyncService;
+use App\Services\WhatsappTokenRefreshService;
 use Carbon\Carbon;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Http;
@@ -163,6 +169,84 @@ class CronController extends Controller
         }
     }
 
+    /**
+     * Cron job: Refresh expiring WhatsApp access tokens.
+     * Should run daily. Refreshes tokens expiring within 7 days,
+     * and also checks legacy tokens with no tracked expiry.
+     */
+    public function refreshWhatsappTokens()
+    {
+        Log::info('CronController: refreshWhatsappTokens started');
+
+        $accounts = WhatsappAccount::whereNotNull('access_token')
+            ->where('access_token', '!=', '')
+            ->where(function ($q) {
+                // Tokens expiring within 7 days
+                $q->where('token_expires_at', '<=', Carbon::now()->addDays(7))
+                    // Legacy tokens with no expiry tracked
+                    ->orWhere(function ($sub) {
+                        $sub->whereNull('token_expires_at')
+                            ->where(function ($inner) {
+                                $inner->whereNull('token_refreshed_at')
+                                    ->orWhere('token_refreshed_at', '<=', Carbon::now()->subDays(30));
+                            });
+                    })
+                    // Safety net: tokens not refreshed in 45 days
+                    ->orWhere(function ($sub) {
+                        $sub->whereNotNull('token_expires_at')
+                            ->where(function ($inner) {
+                                $inner->whereNull('token_refreshed_at')
+                                    ->orWhere('token_refreshed_at', '<=', Carbon::now()->subDays(45));
+                            });
+                    });
+            })
+            ->get();
+
+        if ($accounts->isEmpty()) {
+            Log::info('CronController: refreshWhatsappTokens - no tokens need refreshing');
+            return;
+        }
+
+        $success = 0;
+        $failed = 0;
+
+        foreach ($accounts as $account) {
+            $result = WhatsappTokenRefreshService::refreshTokenForAccount($account);
+            if ($result) {
+                $success++;
+            } else {
+                $failed++;
+                // Mark as expired if token is past its expiry
+                if ($account->token_expires_at && Carbon::parse($account->token_expires_at)->isPast()) {
+                    $account->code_verification_status = 'EXPIRED';
+                    $account->save();
+                }
+            }
+        }
+
+        $syncAccounts = WhatsappAccount::whereNotNull('access_token')
+            ->where('access_token', '!=', '')
+            ->get();
+
+        foreach ($syncAccounts as $account) {
+            try {
+                app(MetaWebhookSyncService::class)->syncForAccount($account);
+            } catch (\Throwable $exception) {
+                Log::error('CronController: refreshWhatsappTokens webhook sync failed', [
+                    'account_id' => $account->id,
+                    'message' => $exception->getMessage(),
+                ]);
+            }
+        }
+
+        Log::info('CronController: refreshWhatsappTokens completed', [
+            'success' => $success,
+            'failed' => $failed,
+            'total' => $accounts->count(),
+            'webhook_sync_accounts' => $syncAccounts->count(),
+        ]);
+    }
+
     public function campaignMessage()
     {
 
@@ -179,6 +263,7 @@ class CronController extends Controller
 
         $contactsQuery->chunkById(200, function ($contacts) {
             Log::info('campaignMessage batch', ['count' => $contacts->count()]);
+            $whatsAppLib = new WhatsAppLib();
             foreach ($contacts as $contact) {
 
                 $campaign = $contact->campaign;
@@ -278,17 +363,15 @@ class CronController extends Controller
                             'parameters' => $headerParams
                         ];
                     } elseif ($template->header_format === 'IMAGE' && !empty($template->header_media)) {
-                        $components[] = [
-                            'type' => 'header',
-                            'parameters' => [
-                                [
-                                    'type' => 'image',
-                                    'image' => [
-                                        'link' => url(getFilePath('templateHeader') . '/' . $template->header_media)
-                                    ]
-                                ]
-                            ]
-                        ];
+                        $headerComponent = $whatsAppLib->buildTemplateImageHeaderComponent($template, $connectedWhatsapp);
+                        if (!$headerComponent) {
+                            $this->markCampaignContactFailed($campaign, $contact, 'template_header_media_unavailable', [
+                                'template_id' => (int) ($template->id ?? 0),
+                                'template_media' => (string) $template->header_media,
+                            ], true);
+                            continue;
+                        }
+                        $components[] = $headerComponent;
                     }
                 }
 
@@ -385,6 +468,46 @@ class CronController extends Controller
                 ])->post($url, $data);
 
                 $responseData = $response->json();
+
+                // Auto-retry on token expiry (HTTP 401 or Meta error code 190)
+                $errorCode = $responseData['error']['code'] ?? null;
+                $errorSubcode = $responseData['error']['error_subcode'] ?? null;
+                $isTokenExpired = $response->status() === 401
+                    || $errorCode == 190
+                    || $errorSubcode == 463
+                    || $errorSubcode == 467;
+
+                if ($isTokenExpired) {
+                    Log::warning('campaignMessage: token expired, attempting auto-refresh', [
+                        'account_id' => $connectedWhatsapp->id,
+                        'campaign_id' => $campaign->id,
+                        'error_code' => $errorCode,
+                    ]);
+
+                    $refreshed = WhatsappTokenRefreshService::refreshTokenForAccount($connectedWhatsapp);
+                    if ($refreshed) {
+                        $connectedWhatsapp->refresh();
+                        $accessToken = $connectedWhatsapp->access_token;
+                        $url = "https://graph.facebook.com/v22.0/{$phoneNumberId}/messages?access_token={$accessToken}";
+
+                        // Retry the request with the new token
+                        $response = Http::withHeaders([
+                            'Authorization' => "Bearer {$accessToken}",
+                        ])->post($url, $data);
+
+                        $responseData = $response->json();
+
+                        Log::info('campaignMessage: retried after token refresh', [
+                            'account_id' => $connectedWhatsapp->id,
+                            'success' => !$response->failed() && !isset($responseData['error']),
+                        ]);
+                    } else {
+                        Log::error('campaignMessage: token refresh failed, cannot retry', [
+                            'account_id' => $connectedWhatsapp->id,
+                        ]);
+                    }
+                }
+
                 $campaign->increment('total_send');
 
                 if ($response->failed() || isset($responseData['error'])) {
@@ -535,15 +658,9 @@ class CronController extends Controller
         }
     }
 
-    public function checkCampaignStatus($campaign)
+    public function checkCampaignStatus(Campaign $campaign): void
     {
-        if ($campaign->total_message <= $campaign->total_failed) {
-            $campaign->status = Status::CAMPAIGN_FAILED;
-            $campaign->save();
-        } else if ($campaign->total_message <= $campaign->total_send) {
-            $campaign->status = Status::CAMPAIGN_COMPLETED;
-            $campaign->save();
-        }
+        app(CampaignLifecycleService::class)->reconcile($campaign);
     }
 
     public function couponExpiration()

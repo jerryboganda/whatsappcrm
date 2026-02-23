@@ -37,6 +37,9 @@
                             <option value="<?php echo e(Status::CAMPAIGN_RUNNING); ?>" <?php if(request()->status == Status::CAMPAIGN_RUNNING): echo 'selected'; endif; ?>>
                                 <?php echo app('translator')->get('Running'); ?>
                             </option>
+                            <option value="<?php echo e(Status::CAMPAIGN_SETTLING); ?>" <?php if(request()->status == Status::CAMPAIGN_SETTLING): echo 'selected'; endif; ?>>
+                                <?php echo app('translator')->get('Settling'); ?>
+                            </option>
                             <option value="<?php echo e(Status::CAMPAIGN_SCHEDULED); ?>" <?php if(request()->status == Status::CAMPAIGN_SCHEDULED): echo 'selected'; endif; ?>>
                                 <?php echo app('translator')->get('Scheduled'); ?>
                             </option>
@@ -102,10 +105,10 @@
                         <?php $__empty_1 = true; $__currentLoopData = $campaigns; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $campaign): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); $__empty_1 = false; ?>
                             <tr>
                                 <td><?php echo e(__(@$campaign->title)); ?></td>
-                                <td><?php echo e(@$campaign->total_message); ?></td>
-                                <td><?php echo e(@$campaign->total_send); ?></td>
-                                <td><?php echo e(@$campaign->total_success); ?></td>
-                                <td><?php echo e(@$campaign->total_failed); ?></td>
+                                <td><?php echo e($campaign->report_targeted ?? $campaign->total_message); ?></td>
+                                <td><?php echo e($campaign->report_sent ?? $campaign->total_send); ?></td>
+                                <td><?php echo e($campaign->report_delivered ?? $campaign->total_success); ?></td>
+                                <td><?php echo e($campaign->report_failed ?? $campaign->total_failed); ?></td>
                                 <td>
                                     <?php echo e(showDateTime($campaign->send_at)); ?><br><?php echo e(diffForHumans($campaign->send_at)); ?>
 
@@ -147,6 +150,13 @@
             $('.filter-form').find('select').on('change', function() {
                 $('.filter-form').submit();
             });
+
+            const hasActiveCampaigns = <?php echo json_encode((bool) ($hasActiveCampaigns ?? false), 15, 512) ?>;
+            if (hasActiveCampaigns) {
+                setTimeout(function() {
+                    window.location.reload();
+                }, 45000);
+            }
         })(jQuery);
     </script>
 <?php $__env->stopPush(); ?>

@@ -115,10 +115,8 @@ trait ContactListManager
     {
         $contactList = ContactList::where('user_id', getParentUser()->id)->findOrFailWithApi("contact list", $id);
 
-        if ($contactList->contact()->count()) {
-            $message = "This list cannot be deleted because it is associated with one or more contacts";
-            return responseManager("list_not_deleted", $message, "error");
-        }
+        // Detach all associated contacts before deleting the list
+        $contactList->contact()->detach();
         $contactList->delete();
 
         $message = "Contact list deleted successfully";

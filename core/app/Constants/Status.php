@@ -83,6 +83,7 @@ class Status
     const CAMPAIGN_PENDING = 0;
     const CAMPAIGN_QUEUED = 10;
     const CAMPAIGN_PROCESSING = 11;
+    const CAMPAIGN_SETTLING = 12;
     const CAMPAIGN_ANALYTICS_V1 = 1;
     const CAMPAIGN_ANALYTICS_V2 = 2;
 

@@ -15,7 +15,7 @@ return [
     |
     */
 
-    'default' => 'pusher',
+    'default' => env('BROADCAST_CONNECTION', env('BROADCAST_DRIVER', 'log')),
 
     /*
     |--------------------------------------------------------------------------

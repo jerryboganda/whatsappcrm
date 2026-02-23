@@ -8,7 +8,10 @@
 </head>
 <body>
     <main class="wrap">
-        <h1>WA Group Capture</h1>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+            <h1 style="margin:0">WA Group Capture</h1>
+            <span id="versionBadge" class="version-badge">v1.3.0</span>
+        </div>
         <p id="statusText" class="status">Ready. Open a WhatsApp group member panel and click Scan.</p>
 
         <div class="actions">
@@ -24,6 +27,9 @@
         <section class="meta">
             <div><strong>Group:</strong> <span id="groupName">-</span></div>
             <div><strong>Members:</strong> <span id="memberCount">0</span></div>
+            <div><strong>Source:</strong> <span id="scanSource">-</span></div>
+            <div id="expectedRow" style="display:none"><strong>Expected:</strong> <span id="expectedCount">-</span></div>
+            <div id="nameOnlyRow" style="display:none"><strong>Name only:</strong> <span id="nameOnlyCount">0</span></div>
             <div><strong>Invalid:</strong> <span id="invalidCount">0</span></div>
             <div><strong>Duplicates:</strong> <span id="duplicateCount">0</span></div>
             <div><strong>Config:</strong> <span id="configState">Not linked</span></div>

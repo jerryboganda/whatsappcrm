@@ -13,10 +13,13 @@ use Carbon\Carbon;
 use Exception;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 
 class WhatsAppLib
 {
+    private static array $templateHeaderMediaCache = [];
+
     public function sendInteractiveListMessage($toNumber, $whatsappAccount, $interactiveList)
     {
         $phoneNumberId = $whatsappAccount->phone_number_id;
@@ -322,17 +325,11 @@ class WhatsAppLib
                     'parameters' => $templateHeaderParams
                 ];
             } elseif ($template->header_format === 'IMAGE' && !empty($template->header_media)) {
-                $components[] = [
-                    'type' => 'header',
-                    'parameters' => [
-                        [
-                            'type' => 'image',
-                            'image' => [
-                                'link' => url(getFilePath('templateHeader') . '/' . $template->header_media)
-                            ]
-                        ]
-                    ]
-                ];
+                $headerComponent = $this->buildTemplateImageHeaderComponent($template, $whatsappAccount);
+                if (!$headerComponent) {
+                    throw new Exception('Template header image is unavailable for sending');
+                }
+                $components[] = $headerComponent;
             }
         }
 
@@ -427,6 +424,137 @@ class WhatsAppLib
         } catch (Exception $ex) {
             throw new Exception($ex->getMessage() ?? "Something went wrong");
         }
+    }
+
+    public function buildTemplateImageHeaderComponent($template, $whatsappAccount): ?array
+    {
+        if (!$template || strtoupper((string) ($template->header_format ?? '')) !== 'IMAGE' || empty($template->header_media)) {
+            return null;
+        }
+
+        $cacheKey = implode(':', [
+            (int) ($whatsappAccount->id ?? 0),
+            (int) ($template->id ?? 0),
+            (string) $template->header_media,
+            (string) ($whatsappAccount->phone_number_id ?? ''),
+        ]);
+
+        $cachedMediaId = self::$templateHeaderMediaCache[$cacheKey] ?? null;
+        if (is_string($cachedMediaId) && $cachedMediaId !== '') {
+            return $this->toTemplateHeaderImageIdComponent($cachedMediaId);
+        }
+
+        $localFilePath = $this->templateHeaderAbsolutePath((string) $template->header_media);
+        if ($localFilePath && file_exists($localFilePath)) {
+            try {
+                $phoneNumberId = (string) ($whatsappAccount->phone_number_id ?? '');
+                $accessToken = (string) ($whatsappAccount->access_token ?? '');
+                if ($phoneNumberId !== '' && $accessToken !== '') {
+                    $mediaEndpoint = $this->getWhatsAppBaseUrl() . "{$phoneNumberId}/media";
+                    $uploadResponse = $this->uploadMedia($mediaEndpoint, $localFilePath, $accessToken);
+                    $mediaId = (string) ($uploadResponse['id'] ?? '');
+                    if ($mediaId !== '') {
+                        self::$templateHeaderMediaCache[$cacheKey] = $mediaId;
+                        return $this->toTemplateHeaderImageIdComponent($mediaId);
+                    }
+                }
+            } catch (\Throwable $exception) {
+                Log::warning('template header media upload failed; falling back to link', [
+                    'template_id' => (int) ($template->id ?? 0),
+                    'whatsapp_account_id' => (int) ($whatsappAccount->id ?? 0),
+                    'file' => (string) $template->header_media,
+                    'error_context' => $exception->getMessage(),
+                ]);
+            }
+        } else {
+            Log::warning('template header media file missing on disk', [
+                'template_id' => (int) ($template->id ?? 0),
+                'whatsapp_account_id' => (int) ($whatsappAccount->id ?? 0),
+                'file' => (string) $template->header_media,
+                'path' => $localFilePath,
+            ]);
+        }
+
+        $publicUrl = $this->templateHeaderPublicUrl((string) $template->header_media);
+        if (!$publicUrl) {
+            return null;
+        }
+
+        return [
+            'type' => 'header',
+            'parameters' => [
+                [
+                    'type' => 'image',
+                    'image' => [
+                        'link' => $publicUrl,
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    private function toTemplateHeaderImageIdComponent(string $mediaId): array
+    {
+        return [
+            'type' => 'header',
+            'parameters' => [
+                [
+                    'type' => 'image',
+                    'image' => [
+                        'id' => $mediaId,
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    private function templateHeaderAbsolutePath(string $fileName): ?string
+    {
+        $relativeDir = trim((string) getFilePath('templateHeader'), '/');
+        if ($relativeDir === '' || trim($fileName) === '') {
+            return null;
+        }
+
+        return base_path('../' . $relativeDir . '/' . ltrim($fileName, '/'));
+    }
+
+    private function templateHeaderPublicUrl(string $fileName): ?string
+    {
+        $relativePath = trim((string) getFilePath('templateHeader'), '/') . '/' . ltrim($fileName, '/');
+        $publicUrl = url($relativePath);
+        $host = (string) parse_url($publicUrl, PHP_URL_HOST);
+
+        if ($this->isPrivateWebhookHost($host)) {
+            $baseUrl = rtrim((string) config('app.url'), '/');
+            if ($baseUrl !== '') {
+                $publicUrl = $baseUrl . '/' . ltrim($relativePath, '/');
+                $host = (string) parse_url($publicUrl, PHP_URL_HOST);
+            }
+        }
+
+        if ($this->isPrivateWebhookHost($host)) {
+            Log::error('template header media URL resolved to private host', [
+                'resolved_url' => $publicUrl,
+                'file' => $fileName,
+            ]);
+            return null;
+        }
+
+        return $publicUrl;
+    }
+
+    private function isPrivateWebhookHost(?string $host): bool
+    {
+        $normalized = strtolower(trim((string) $host));
+        if ($normalized === '') {
+            return true;
+        }
+
+        if (in_array($normalized, ['localhost', '127.0.0.1', '::1'], true)) {
+            return true;
+        }
+
+        return str_ends_with($normalized, '.local');
     }
 
     public function messageSend($request, $toNumber, $whatsappAccount)

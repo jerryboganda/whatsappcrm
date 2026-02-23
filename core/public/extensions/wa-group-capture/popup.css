@@ -56,6 +56,15 @@ h1 {
     background: #ffffff;
 }
 
+.version-badge {
+    font-size: 10px;
+    background: #128c7e;
+    color: #fff;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: bold;
+}
+
 .meta {
     margin-top: 8px;
     font-size: 12px;

@@ -17,11 +17,13 @@ use App\Lib\WhatsApp\WhatsAppLib;
 use App\Models\ContactFlowState;
 use App\Models\Flow;
 use App\Models\User;
+use App\Services\CampaignLifecycleService;
 use libphonenumber\PhoneNumberUtil;
 use App\Traits\WhatsappManager;
 use Carbon\Carbon;
 use Exception;
 use App\Models\Order;
+use Illuminate\Support\Facades\Log;
 
 class WebhookController extends Controller
 {
@@ -41,320 +43,108 @@ class WebhookController extends Controller
     public function webhookResponse(Request $request)
     {
         $entry = $request->input('entry', []);
-        if (!is_array($entry))
-            return;
-
-        $receiverPhoneNumber = null;
-        $senderPhoneNumber = null;
-        $senderId = null;
-        $messageText = null;
-        $buttonReply = null;
-        $listReply = null;
-        $mediaId = null;
-        $mediaType = null;
-        $mediaMimeType = null;
-        $messageType = 'text';
-        $messageCaption = null;
-        $profileName = null;
-
-        $whatsappAccount = WhatsappAccount::where('whatsapp_business_account_id', $entry[0]['id'])->first();
-
-        if (!$whatsappAccount)
-            return;
-
-        $user = User::active()->find($whatsappAccount->user_id);
-
-        if (!$user)
-            return;
-
-        foreach ($entry as $entryItem) {
-
-            foreach ($entryItem['changes'] as $change) {
-
-                if (!is_array($change) || !isset($change['value']))
-                    continue;
-
-                if (isset($change['field']) && $change['field'] == 'message_template_status_update') {
-                    sleep(10); // wait for 10 seconds until the template store
-                    $this->templateUpdateNotify($change['value']['message_template_id'], $change['value']['event'], $change['value']['reason'] ?? '');
-                    continue;
-                }
-                ;
-
-                $metaValue = $change['value'];
-                if (!is_array($metaValue))
-                    continue;
-
-                $profileName = $metaValue['contacts'][0]['profile']['name'] ?? null;
-                $metaData = $metaValue['metadata'] ?? [];
-                $metaMessage = $metaValue['messages'] ?? null;
-
-                if (isset($metaData['phone_number_id'])) {
-                    $receiverPhoneNumberId = $metaData['phone_number_id'];
-                }
-
-                if (isset($metaData['display_phone_number'])) {
-                    $receiverPhoneNumber = $metaData['display_phone_number'];
-                }
-
-                if (isset($metaMessage[0]['from'])) {
-                    $senderPhoneNumber = $metaMessage[0]['from'];
-                }
-
-                if (isset($metaMessage[0]['id'])) {
-                    $senderId = $metaMessage[0]['id'];
-                }
-
-                $statusPayloads = $metaValue['statuses'] ?? [];
-                if (is_array($statusPayloads) && count($statusPayloads) > 0) {
-                    foreach ($statusPayloads as $statusPayload) {
-                        if (is_array($statusPayload)) {
-                            $this->handleStatusUpdate($statusPayload, $whatsappAccount);
-                        }
-                    }
-                }
-
-                if (isset($metaMessage[0]['text']['body']) || isset($metaMessage[0]['button']['text'])) {
-                    $messageText = $metaMessage[0]['button']['text'] ?? $metaMessage[0]['text']['body'];
-                }
-
-                if (isset($metaMessage[0]['type'])) {
-                    $messageType = $metaMessage[0]['type'];
-                }
-
-                if ($messageType == 'interactive') {
-                    if (isset($metaMessage[0]['interactive']['button_reply']['title'])) {
-                        $buttonReply = $metaMessage[0]['interactive']['button_reply']['title'];
-                    }
-                    if (isset($metaMessage[0]['interactive']['list_reply']['title'])) {
-                        $listReply = [
-                            'title' => $metaMessage[0]['interactive']['list_reply']['title'] ?? '',
-                            'description' => $metaMessage[0]['interactive']['list_reply']['description'] ?? '',
-                        ];
-                    }
-                }
-
-                // Handle media messages
-                if (isset($metaMessage[0]['type']) && $metaMessage[0]['type'] !== 'text') {
-                    $mediaType = $metaMessage[0]['type'];
-
-                    if (isset($metaMessage[0][$mediaType]['id'])) {
-                        $mediaId = $metaMessage[0][$mediaType]['id'];
-                    }
-                    if (isset($metaMessage[0][$mediaType]['mime_type'])) {
-                        $mediaMimeType = $metaMessage[0][$mediaType]['mime_type'];
-                    }
-                    if (isset($metaMessage[0][$mediaType]['caption'])) {
-                        $messageCaption = $metaMessage[0][$mediaType]['caption'];
-                    }
-                }
-            }
+        if (!is_array($entry) || count($entry) === 0) {
+            Log::warning('webhook payload ignored: empty entry', [
+                'error_context' => 'missing_entry',
+            ]);
+            return response()->json(['status' => 'ignored'], 200);
         }
 
-        if (($messageText || $buttonReply || $listReply || $mediaId) && $senderPhoneNumber && $senderId) {
-            // Save the incoming message first
-            $receiverPhoneNumber = preg_replace('/\D/', '', $receiverPhoneNumber);
-            $phoneUtil = PhoneNumberUtil::getInstance();
-            $parseNumber = $phoneUtil->parse('+' . $senderPhoneNumber, '');
-            $countryCode = $parseNumber->getCountryCode();
-            $nationalNumber = $parseNumber->getNationalNumber();
-            $newContact = false;
-
-            $contact = Contact::where('mobile_code', $countryCode)
-                ->where('mobile', $nationalNumber)
-                ->where('user_id', $user->id)
-                ->with('conversation')
-                ->first();
-
-            if (!$contact) {
-                $newContact = true;
-                $contact = new Contact();
-                $contact->firstname = $profileName;
-                $contact->mobile_code = $countryCode;
-                $contact->mobile = $nationalNumber;
-                $contact->user_id = $user->id;
-                $contact->save();
+        foreach ($entry as $entryIndex => $entryItem) {
+            $wabaId = (string) ($entryItem['id'] ?? '');
+            if ($wabaId === '') {
+                Log::warning('webhook payload ignored: missing waba id', [
+                    'entry_index' => $entryIndex,
+                    'error_context' => 'missing_waba_id',
+                ]);
+                continue;
             }
 
-            $conversation = Conversation::where('contact_id', $contact->id)->where('user_id', $user->id)->where('whatsapp_account_id', $whatsappAccount->id)->first();
-            if (!$conversation) {
-                $newContact = true;
-                $conversation = $this->createConversation($contact, $whatsappAccount);
+            $whatsappAccount = WhatsappAccount::where('whatsapp_business_account_id', $wabaId)->first();
+            if (!$whatsappAccount) {
+                Log::warning('webhook payload ignored: unknown waba', [
+                    'waba_id' => $wabaId,
+                    'entry_index' => $entryIndex,
+                    'error_context' => 'unknown_waba',
+                ]);
+                continue;
             }
 
-            $messageExists = Message::where('whatsapp_message_id', $senderId)->exists();
-
-            $whatsappLib = new WhatsAppLib();
-            $automationLib = new AutomationLib();
-
-            if (!$messageExists) {
-                // Save the incoming message
-                $message = new Message();
-                $message->whatsapp_account_id = $whatsappAccount->id;
-                $message->whatsapp_message_id = $senderId;
-                $message->user_id = $user->id ?? 0;
-                $message->conversation_id = $conversation->id;
-                $message->message = $messageText ?? $buttonReply ?? '';
-                $message->list_reply = $listReply;
-                $message->type = Status::MESSAGE_RECEIVED;
-                $message->message_type = getIntMessageType($messageType);
-                $message->media_id = $mediaId;
-                $message->media_type = $mediaType;
-                $message->media_caption = $messageCaption;
-                $message->mime_type = $mediaMimeType;
-                $message->ordering = Carbon::now();
-                $message->save();
-
-                $conversation->last_message_at = Carbon::now();
-                $conversation->save();
-
-                $this->attributeInboundReplyToCampaign($message, $contact, $whatsappAccount);
-
-                // If it's a media message, fetch and store the media
-                if ($mediaId) {
-                    $accessToken = $whatsappAccount->access_token;
-                    try {
-                        $mediaUrl = $whatsappLib->getMediaUrl($mediaId, $accessToken);
-
-                        if ($mediaUrl && $mediaType == 'image') {
-                            $mediaPath = $whatsappLib->storedMediaToLocal($mediaUrl['url'], $mediaId, $accessToken, $user->id);
-                            $message->media_url = $mediaUrl;
-                            $message->media_path = $mediaPath;
-
-                            $message->save();
-                        }
-                    } catch (Exception $ex) {
-                    }
-                }
-
-                // Handle Order Messages
-                if ($messageType == 'order') {
-                    $orderData = $metaMessage[0]['order'] ?? null;
-                    if ($orderData) {
-                        try {
-                            $totalAmount = 0;
-                            $currency = 'USD';
-                            $products = [];
-
-                            foreach ($orderData['product_items'] as $item) {
-                                $totalAmount += $item['item_price'] * $item['quantity'];
-                                $currency = $item['currency'];
-                                $products[] = [
-                                    'retailer_id' => $item['product_retailer_id'],
-                                    'quantity' => $item['quantity'],
-                                    'price' => $item['item_price'],
-                                    'currency' => $item['currency']
-                                ];
-                            }
-
-                            $order = new Order();
-                            $order->user_id = $user->id;
-                            $order->contact_id = $contact->id;
-                            $order->conversation_id = $conversation->id;
-                            $order->amount = $totalAmount;
-                            $order->currency = $currency;
-                            $order->status = 'pending';
-                            $order->products_json = $products;
-                            $order->save();
-
-                            // Optional: Send auto-reply for order received
-                            $whatsappLib->sendAutoReply($user, $conversation, "Order Received: #" . $order->id);
-
-                        } catch (Exception $e) {
-                            // Log error
-                        }
-                    }
-                }
-
-                $html = view('Template::user.inbox.single_message', compact('message'))->render();
-                $lastConversationMessageHtml = view("Template::user.inbox.conversation_last_message", compact('message'))->render();
-
-                event(new ReceiveMessage($whatsappAccount->id, [
-                    'html' => $html,
-                    'message' => $message,
-                    'newMessage' => true,
-                    'newContact' => $newContact,
-                    'lastMessageHtml' => $lastConversationMessageHtml,
-                    'unseenMessage' => $conversation->unseenMessages()->count() < 10 ? $conversation->unseenMessages()->count() : '9+',
-                    'lastMessageAt' => showDateTime(Carbon::now()),
-                    'conversationId' => $conversation->id,
-                    'mediaPath' => getFilePath('conversation')
-                ]));
+            $user = User::active()->find($whatsappAccount->user_id);
+            if (!$user) {
+                Log::warning('webhook payload ignored: inactive user', [
+                    'waba_id' => $wabaId,
+                    'account_id' => $whatsappAccount->id,
+                    'error_context' => 'inactive_user',
+                ]);
+                continue;
             }
 
-            $messagesInConversation = Message::where('conversation_id', $conversation->id)->where('type', Status::MESSAGE_RECEIVED)->count();
+            $changes = $entryItem['changes'] ?? [];
+            if (!is_array($changes) || count($changes) === 0) {
+                Log::info('webhook payload ignored: no changes', [
+                    'waba_id' => $wabaId,
+                    'account_id' => $whatsappAccount->id,
+                    'error_context' => 'missing_changes',
+                ]);
+                continue;
+            }
 
-            if ($messagesInConversation == 1 && @$whatsappAccount->welcomeMessage) {
-                $this->sendWelcomeMessage($whatsappAccount, $user, $contact, $conversation);
-            } else {
-
-
-                if (!$messageExists) {
-                    $automationFlowQuery = Flow::where('user_id', $user->id)->with(['nodes', 'nodes.media'])->active();
-                    $lastState = ContactFlowState::where('conversation_id', $conversation->id)
-                        ->latest('last_interacted_at')
-                        ->first();
-                    $queryText = $buttonReply ?? strtolower($messageText);
-
-                    if ($newContact) {
-                        $automationFlow = $automationFlowQuery->newMessage()->first();
-                    } else {
-                        if ($buttonReply && $lastState && $lastState->status == Status::FLOW_STATE_WAITING) {
-                            $automationFlow = Flow::with('nodes', 'nodes.media')->find($lastState->flow_id);
-                            if (!$automationFlow) {
-                                $automationFlow = $automationFlowQuery->keywordMatch()->where('keyword', $messageText)->first();
-                            }
-                        } else {
-                            $automationFlow = $automationFlowQuery->keywordMatch()->where('keyword', $messageText)->first();
-                        }
+            foreach ($changes as $changeIndex => $change) {
+                try {
+                    if (!is_array($change) || !isset($change['value']) || !is_array($change['value'])) {
+                        Log::warning('webhook change ignored: invalid value', [
+                            'waba_id' => $wabaId,
+                            'account_id' => $whatsappAccount->id,
+                            'change_index' => $changeIndex,
+                            'error_context' => 'invalid_change_value',
+                        ]);
+                        continue;
                     }
-                    if ($automationFlow) {
-                        $automationLib->process($user, $automationFlow, $lastState, $conversation, $queryText);
-                    } else {
-                        // Dialogflow Logic
-                        $dialogflowConfig = \App\Models\DialogflowConfig::where('user_id', $user->id)->where('status', 1)->first();
-                        $dialogflowResponse = null;
 
-                        if ($dialogflowConfig) {
-                            try {
-                                $dialogflowService = new \App\Lib\Dialogflow\DialogflowService($dialogflowConfig);
-                                $dialogflowResult = $dialogflowService->detectIntent($conversation->id, $messageText);
+                    $field = (string) ($change['field'] ?? '');
+                    $metaValue = $change['value'];
+                    $statusPayloads = is_array($metaValue['statuses'] ?? null) ? $metaValue['statuses'] : [];
+                    $metaMessages = is_array($metaValue['messages'] ?? null) ? $metaValue['messages'] : [];
 
-                                if ($dialogflowResult && !empty($dialogflowResult['fulfillmentText'])) {
-                                    $dialogflowResponse = $dialogflowResult['fulfillmentText'];
-                                }
-                            } catch (\Exception $e) {
-                                // Log error or ignore
-                            }
-                        }
-
-                        if ($dialogflowResponse) {
-                            // Send Dialogflow Response
-                            $request = new Request(['message' => $dialogflowResponse]);
-                            $messageSend = $whatsappLib->messageSend($request, $conversation->contact->mobileNumber, $whatsappAccount);
-
-                            if ($messageSend) {
-                                extract($messageSend);
-                                $message = new Message();
-                                $message->user_id = $user->id;
-                                $message->whatsapp_account_id = $whatsappAccount->id;
-                                $message->whatsapp_message_id = $whatsAppMessage[0]['id'];
-                                $message->conversation_id = $conversation->id;
-                                $message->type = Status::MESSAGE_SENT;
-                                $message->message = $dialogflowResponse;
-                                $message->message_type = getIntMessageType($messageType);
-                                $message->status = Status::MESSAGE_SENT;
-                                $message->ordering = Carbon::now();
-                                $message->save();
-
-                                $conversation->last_message_at = Carbon::now();
-                                $conversation->save();
-                            }
-
-                        } else {
-                            $whatsappLib->sendAutoReply($user, $conversation, $messageText);
-                        }
+                    if ($field === 'message_template_status_update') {
+                        sleep(10); // wait until template storage is ready
+                        $this->templateUpdateNotify($metaValue['message_template_id'] ?? '', $metaValue['event'] ?? '', $metaValue['reason'] ?? '');
+                        continue;
                     }
+
+                    foreach ($statusPayloads as $statusIndex => $statusPayload) {
+                        if (!is_array($statusPayload)) {
+                            continue;
+                        }
+
+                        $campaignContactId = $this->handleStatusUpdate($statusPayload, $whatsappAccount);
+                        Log::info('webhook status processed', [
+                            'waba_id' => $wabaId,
+                            'field' => $field,
+                            'statuses_count' => count($statusPayloads),
+                            'messages_count' => count($metaMessages),
+                            'processed_campaign_contact_id' => $campaignContactId,
+                            'status_index' => $statusIndex,
+                            'error_context' => null,
+                        ]);
+                    }
+
+                    if (count($metaMessages) > 0) {
+                        $this->processInboundMessage($metaValue, $metaMessages[0], $user, $whatsappAccount, [
+                            'waba_id' => $wabaId,
+                            'field' => $field,
+                            'statuses_count' => count($statusPayloads),
+                            'messages_count' => count($metaMessages),
+                        ]);
+                    }
+                } catch (\Throwable $exception) {
+                    Log::error('webhook change processing failed', [
+                        'waba_id' => $wabaId,
+                        'account_id' => $whatsappAccount->id,
+                        'change_index' => $changeIndex,
+                        'error_context' => $exception->getMessage(),
+                    ]);
                 }
             }
         }
@@ -362,18 +152,278 @@ class WebhookController extends Controller
         return response()->json(['status' => 'received'], 200);
     }
 
-    private function handleStatusUpdate(array $statusPayload, WhatsappAccount $whatsappAccount): void
+    private function processInboundMessage(
+        array $metaValue,
+        array $metaMessage,
+        User $user,
+        WhatsappAccount $whatsappAccount,
+        array $auditContext = []
+    ): void {
+        $receiverPhoneNumber = (string) ($metaValue['metadata']['display_phone_number'] ?? '');
+        $profileName = $metaValue['contacts'][0]['profile']['name'] ?? null;
+        $senderPhoneNumber = (string) ($metaMessage['from'] ?? '');
+        $senderId = (string) ($metaMessage['id'] ?? '');
+
+        $messageText = $metaMessage['button']['text'] ?? ($metaMessage['text']['body'] ?? null);
+        $messageType = (string) ($metaMessage['type'] ?? 'text');
+        $buttonReply = null;
+        $listReply = null;
+        $mediaId = null;
+        $mediaType = null;
+        $mediaMimeType = null;
+        $messageCaption = null;
+
+        if ($messageType === 'interactive') {
+            $buttonReply = $metaMessage['interactive']['button_reply']['title'] ?? null;
+            if (isset($metaMessage['interactive']['list_reply'])) {
+                $listReply = [
+                    'title' => $metaMessage['interactive']['list_reply']['title'] ?? '',
+                    'description' => $metaMessage['interactive']['list_reply']['description'] ?? '',
+                ];
+            }
+        }
+
+        if ($messageType !== 'text' && isset($metaMessage[$messageType])) {
+            $mediaType = $messageType;
+            $mediaId = $metaMessage[$mediaType]['id'] ?? null;
+            $mediaMimeType = $metaMessage[$mediaType]['mime_type'] ?? null;
+            $messageCaption = $metaMessage[$mediaType]['caption'] ?? null;
+        }
+
+        if (!($messageText || $buttonReply || $listReply || $mediaId) || !$senderPhoneNumber || !$senderId) {
+            return;
+        }
+
+        $receiverPhoneNumber = preg_replace('/\D/', '', $receiverPhoneNumber);
+        $phoneUtil = PhoneNumberUtil::getInstance();
+        $parseNumber = $phoneUtil->parse('+' . $senderPhoneNumber, '');
+        $countryCode = $parseNumber->getCountryCode();
+        $nationalNumber = $parseNumber->getNationalNumber();
+        $newContact = false;
+
+        $contact = Contact::where('mobile_code', $countryCode)
+            ->where('mobile', $nationalNumber)
+            ->where('user_id', $user->id)
+            ->with('conversation')
+            ->first();
+
+        if (!$contact) {
+            $newContact = true;
+            $contact = new Contact();
+            $contact->firstname = $profileName;
+            $contact->mobile_code = $countryCode;
+            $contact->mobile = $nationalNumber;
+            $contact->user_id = $user->id;
+            $contact->save();
+        }
+
+        $conversation = Conversation::where('contact_id', $contact->id)
+            ->where('user_id', $user->id)
+            ->where('whatsapp_account_id', $whatsappAccount->id)
+            ->first();
+        if (!$conversation) {
+            $newContact = true;
+            $conversation = $this->createConversation($contact, $whatsappAccount);
+        }
+
+        $messageExists = Message::where('whatsapp_message_id', $senderId)->exists();
+        $whatsappLib = new WhatsAppLib();
+        $automationLib = new AutomationLib();
+
+        if (!$messageExists) {
+            $message = new Message();
+            $message->whatsapp_account_id = $whatsappAccount->id;
+            $message->whatsapp_message_id = $senderId;
+            $message->user_id = $user->id ?? 0;
+            $message->conversation_id = $conversation->id;
+            $message->message = $messageText ?? $buttonReply ?? '';
+            $message->list_reply = $listReply;
+            $message->type = Status::MESSAGE_RECEIVED;
+            $message->message_type = getIntMessageType($messageType);
+            $message->media_id = $mediaId;
+            $message->media_type = $mediaType;
+            $message->media_caption = $messageCaption;
+            $message->mime_type = $mediaMimeType;
+            $message->ordering = Carbon::now();
+            $message->save();
+
+            $conversation->last_message_at = Carbon::now();
+            $conversation->save();
+
+            $this->attributeInboundReplyToCampaign($message, $contact, $whatsappAccount);
+
+            if ($mediaId) {
+                $accessToken = $whatsappAccount->access_token;
+                try {
+                    $mediaUrl = $whatsappLib->getMediaUrl($mediaId, $accessToken);
+                    if ($mediaUrl && $mediaType == 'image') {
+                        $mediaPath = $whatsappLib->storedMediaToLocal($mediaUrl['url'], $mediaId, $accessToken, $user->id);
+                        $message->media_url = $mediaUrl;
+                        $message->media_path = $mediaPath;
+                        $message->save();
+                    }
+                } catch (Exception $ex) {
+                    Log::warning('webhook media fetch failed', [
+                        'waba_id' => $auditContext['waba_id'] ?? null,
+                        'error_context' => $ex->getMessage(),
+                    ]);
+                }
+            }
+
+            if ($messageType == 'order') {
+                $orderData = $metaMessage['order'] ?? null;
+                if ($orderData) {
+                    try {
+                        $totalAmount = 0;
+                        $currency = 'USD';
+                        $products = [];
+
+                        foreach ($orderData['product_items'] as $item) {
+                            $totalAmount += $item['item_price'] * $item['quantity'];
+                            $currency = $item['currency'];
+                            $products[] = [
+                                'retailer_id' => $item['product_retailer_id'],
+                                'quantity' => $item['quantity'],
+                                'price' => $item['item_price'],
+                                'currency' => $item['currency']
+                            ];
+                        }
+
+                        $order = new Order();
+                        $order->user_id = $user->id;
+                        $order->contact_id = $contact->id;
+                        $order->conversation_id = $conversation->id;
+                        $order->amount = $totalAmount;
+                        $order->currency = $currency;
+                        $order->status = 'pending';
+                        $order->products_json = $products;
+                        $order->save();
+
+                        $whatsappLib->sendAutoReply($user, $conversation, "Order Received: #" . $order->id);
+                    } catch (Exception $e) {
+                        Log::warning('webhook order process failed', [
+                            'waba_id' => $auditContext['waba_id'] ?? null,
+                            'error_context' => $e->getMessage(),
+                        ]);
+                    }
+                }
+            }
+
+            $html = view('Template::user.inbox.single_message', compact('message'))->render();
+            $lastConversationMessageHtml = view("Template::user.inbox.conversation_last_message", compact('message'))->render();
+
+            $this->dispatchReceiveMessageSafely($whatsappAccount->id, [
+                'html' => $html,
+                'message' => $message,
+                'newMessage' => true,
+                'newContact' => $newContact,
+                'lastMessageHtml' => $lastConversationMessageHtml,
+                'unseenMessage' => $conversation->unseenMessages()->count() < 10 ? $conversation->unseenMessages()->count() : '9+',
+                'lastMessageAt' => showDateTime(Carbon::now()),
+                'conversationId' => $conversation->id,
+                'mediaPath' => getFilePath('conversation')
+            ], [
+                'message_id' => (int) $message->id,
+                'whatsapp_message_id' => $message->whatsapp_message_id,
+                'context' => 'inbound_message',
+            ]);
+        }
+
+        $messagesInConversation = Message::where('conversation_id', $conversation->id)
+            ->where('type', Status::MESSAGE_RECEIVED)
+            ->count();
+
+        if ($messagesInConversation == 1 && @$whatsappAccount->welcomeMessage) {
+            $this->sendWelcomeMessage($whatsappAccount, $user, $contact, $conversation);
+            return;
+        }
+
+        if ($messageExists) {
+            return;
+        }
+
+        $automationFlowQuery = Flow::where('user_id', $user->id)->with(['nodes', 'nodes.media'])->active();
+        $lastState = ContactFlowState::where('conversation_id', $conversation->id)
+            ->latest('last_interacted_at')
+            ->first();
+        $queryText = $buttonReply ?? strtolower((string) $messageText);
+
+        if ($newContact) {
+            $automationFlow = $automationFlowQuery->newMessage()->first();
+        } else {
+            if ($buttonReply && $lastState && $lastState->status == Status::FLOW_STATE_WAITING) {
+                $automationFlow = Flow::with('nodes', 'nodes.media')->find($lastState->flow_id);
+                if (!$automationFlow) {
+                    $automationFlow = $automationFlowQuery->keywordMatch()->where('keyword', $messageText)->first();
+                }
+            } else {
+                $automationFlow = $automationFlowQuery->keywordMatch()->where('keyword', $messageText)->first();
+            }
+        }
+
+        if ($automationFlow) {
+            $automationLib->process($user, $automationFlow, $lastState, $conversation, $queryText);
+            return;
+        }
+
+        $dialogflowConfig = \App\Models\DialogflowConfig::where('user_id', $user->id)->where('status', 1)->first();
+        $dialogflowResponse = null;
+
+        if ($dialogflowConfig) {
+            try {
+                $dialogflowService = new \App\Lib\Dialogflow\DialogflowService($dialogflowConfig);
+                $dialogflowResult = $dialogflowService->detectIntent($conversation->id, $messageText);
+
+                if ($dialogflowResult && !empty($dialogflowResult['fulfillmentText'])) {
+                    $dialogflowResponse = $dialogflowResult['fulfillmentText'];
+                }
+            } catch (\Exception $e) {
+                Log::warning('webhook dialogflow failed', [
+                    'waba_id' => $auditContext['waba_id'] ?? null,
+                    'error_context' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        if ($dialogflowResponse) {
+            $request = new Request(['message' => $dialogflowResponse]);
+            $messageSend = $whatsappLib->messageSend($request, $conversation->contact->mobileNumber, $whatsappAccount);
+
+            if ($messageSend) {
+                extract($messageSend);
+                $message = new Message();
+                $message->user_id = $user->id;
+                $message->whatsapp_account_id = $whatsappAccount->id;
+                $message->whatsapp_message_id = $whatsAppMessage[0]['id'];
+                $message->conversation_id = $conversation->id;
+                $message->type = Status::MESSAGE_SENT;
+                $message->message = $dialogflowResponse;
+                $message->message_type = getIntMessageType($messageType);
+                $message->status = Status::MESSAGE_SENT;
+                $message->ordering = Carbon::now();
+                $message->save();
+
+                $conversation->last_message_at = Carbon::now();
+                $conversation->save();
+            }
+            return;
+        }
+
+        $whatsappLib->sendAutoReply($user, $conversation, $messageText);
+    }
+
+    private function handleStatusUpdate(array $statusPayload, WhatsappAccount $whatsappAccount): ?int
     {
         $messageId = $statusPayload['id'] ?? null;
         $messageStatus = strtolower((string) ($statusPayload['status'] ?? ''));
 
         if (!$messageId || !$messageStatus) {
-            return;
+            return null;
         }
 
         $wMessage = Message::where('whatsapp_message_id', $messageId)->first();
         if (!$wMessage) {
-            return;
+            return null;
         }
 
         $wMessage->status = messageStatus($messageStatus);
@@ -384,10 +434,12 @@ class WebhookController extends Controller
             $isNewMessage = true;
         }
 
+        $campaignContactId = $this->syncCampaignDeliveryStatus($wMessage, $statusPayload, $messageStatus);
+
         $message = $wMessage;
         $html = view('Template::user.inbox.single_message', compact('message'))->render();
 
-        event(new ReceiveMessage($whatsappAccount->id, [
+        $this->dispatchReceiveMessageSafely($whatsappAccount->id, [
             'html' => $html,
             'messageId' => $message->id,
             'message' => $message,
@@ -396,16 +448,21 @@ class WebhookController extends Controller
             'mediaPath' => getFilePath('conversation'),
             'conversationId' => $wMessage->conversation_id,
             'unseenMessage' => $wMessage->conversation ? ($wMessage->conversation->unseenMessages()->count() < 10 ? $wMessage->conversation->unseenMessages()->count() : '9+') : 0,
-        ]));
+        ], [
+            'message_id' => (int) $message->id,
+            'whatsapp_message_id' => $message->whatsapp_message_id,
+            'message_status' => $messageStatus,
+            'context' => 'status_update',
+        ]);
 
-        $this->syncCampaignDeliveryStatus($wMessage, $statusPayload, $messageStatus);
+        return $campaignContactId;
     }
 
-    private function syncCampaignDeliveryStatus(Message $message, array $statusPayload, string $messageStatus): void
+    private function syncCampaignDeliveryStatus(Message $message, array $statusPayload, string $messageStatus): ?int
     {
         $campaignContact = $this->resolveCampaignContact($message);
         if (!$campaignContact) {
-            return;
+            return null;
         }
 
         if ((int) $message->campaign_id <= 0 && (int) $campaignContact->campaign_id > 0) {
@@ -415,7 +472,7 @@ class WebhookController extends Controller
 
         $campaign = $campaignContact->campaign;
         if (!$campaign) {
-            return;
+            return null;
         }
 
         $eventAt = $this->statusEventTime($statusPayload);
@@ -423,10 +480,10 @@ class WebhookController extends Controller
         $oldDeliveryStatus = (int) ($campaignContact->delivery_status ?? Status::CAMPAIGN_DELIVERY_PENDING);
 
         if ($oldDeliveryStatus === Status::CAMPAIGN_DELIVERY_FAILED && in_array($messageStatus, ['sent', 'delivered', 'read'], true)) {
-            return;
+            return (int) $campaignContact->id;
         }
         if ($oldDeliveryStatus === Status::CAMPAIGN_DELIVERY_READ && $messageStatus === 'failed') {
-            return;
+            return (int) $campaignContact->id;
         }
 
         $this->applyMetaContext($campaignContact, $statusPayload);
@@ -464,7 +521,7 @@ class WebhookController extends Controller
                 $campaign->increment('total_failed');
             }
         } else {
-            return;
+            return (int) $campaignContact->id;
         }
 
         $campaignContact->save();
@@ -480,6 +537,7 @@ class WebhookController extends Controller
         );
 
         $this->syncCampaignRollupStatus($campaign);
+        return (int) $campaignContact->id;
     }
 
     private function resolveCampaignContact(Message $message): ?CampaignContact
@@ -560,9 +618,13 @@ class WebhookController extends Controller
             $campaignContact->meta_billable = (int) ((bool) $pricing['billable']);
         }
         if ($errors) {
+            $errorDetails = $errors['error_data']['details'] ?? $errors['message'] ?? $campaignContact->meta_error_details;
+            if (is_array($errorDetails)) {
+                $errorDetails = json_encode($errorDetails);
+            }
             $campaignContact->meta_error_code = (string) ($errors['code'] ?? $campaignContact->meta_error_code);
             $campaignContact->meta_error_title = (string) ($errors['title'] ?? $campaignContact->meta_error_title);
-            $campaignContact->meta_error_details = (string) ($errors['message'] ?? $campaignContact->meta_error_details);
+            $campaignContact->meta_error_details = (string) $errorDetails;
         }
     }
 
@@ -592,12 +654,7 @@ class WebhookController extends Controller
 
     private function syncCampaignRollupStatus(Campaign $campaign): void
     {
-        if ($campaign->total_message <= $campaign->total_failed) {
-            $campaign->status = Status::CAMPAIGN_FAILED;
-        } elseif ($campaign->total_message <= $campaign->total_send) {
-            $campaign->status = Status::CAMPAIGN_COMPLETED;
-        }
-        $campaign->save();
+        app(CampaignLifecycleService::class)->reconcile($campaign);
     }
 
     private function logCampaignEvent(
@@ -624,6 +681,23 @@ class WebhookController extends Controller
                 'meta_json' => $meta ?: null,
             ]
         );
+    }
+
+    private function dispatchReceiveMessageSafely(int $whatsappAccountId, array $payload, array $context = []): void
+    {
+        try {
+            event(new ReceiveMessage($whatsappAccountId, $payload));
+        } catch (\Throwable $exception) {
+            $logContext = [
+                'whatsapp_account_id' => $whatsappAccountId,
+                'error_context' => $exception->getMessage(),
+            ];
+            foreach ($context as $key => $value) {
+                $logContext[$key] = $value;
+            }
+
+            Log::warning('realtime broadcast failed; persisted webhook state kept', $logContext);
+        }
     }
 
     private function createConversation($contact, $whatsappAccount)

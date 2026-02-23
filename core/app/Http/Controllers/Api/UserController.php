@@ -32,7 +32,7 @@ class UserController extends Controller
         $notify[] = 'User Dashboard';
         
         $campaigns                     = Campaign::where('user_id', $parentUser->id);
-        $widget['active_campaign']     = (clone $campaigns)->where('status', Status::CAMPAIGN_RUNNING)->count();
+        $widget['active_campaign']     = (clone $campaigns)->whereIn('status', [Status::CAMPAIGN_RUNNING, Status::CAMPAIGN_SETTLING])->count();
         $widget['completed_campaign']  = (clone $campaigns)->where('status', Status::CAMPAIGN_COMPLETED)->count();
 
         $totalMessages              = Message::where('user_id', $parentUser->id)->where('type', Status::MESSAGE_SENT);

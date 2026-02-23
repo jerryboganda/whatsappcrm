@@ -6,6 +6,11 @@
     $failures = $analytics['failures']['breakdown'] ?? collect();
     $timeline = $analytics['timeline']['daily'] ?? [];
     $metaEstimated = $analytics['meta_estimated'] ?? [];
+    $health = $analytics['health'] ?? [];
+    $errorAdviceByCode = [
+        '131042' => 'Meta billing/payment issue. Open Meta Business Manager > WhatsApp Account > Payment Settings and add/fix payment method, then retry.',
+        '131053' => 'Meta could not fetch header media. Re-upload header media, ensure public HTTPS accessibility, then retry.',
+    ];
 @endphp
 
 @section('content')
@@ -77,6 +82,21 @@
             @if (($analytics['legacy_mode'] ?? false) === true)
                 <div class="alert alert-warning mt-3 mb-0">
                     @lang('This campaign was sent before analytics v2 linkage. Deep metrics for old records may be partial. New campaigns are fully accurate.')
+                </div>
+            @endif
+
+            @if (($summary['pending_delivery'] ?? 0) > 0)
+                <div class="alert alert-info mt-3 mb-0">
+                    @lang('Live updates are enabled for this report while delivery is still in progress.')
+                </div>
+            @endif
+
+            @if (($summary['pending_delivery'] ?? 0) > 0 && !($health['has_webhook_events'] ?? false))
+                <div class="alert alert-warning mt-3 mb-0">
+                    @lang('API Accepted means Meta acknowledged the send request, not delivery confirmation. Webhook delivery receipts are still pending for this campaign.')
+                    @if (($health['pending_without_webhook_minutes'] ?? 0) > 0)
+                        <span class="d-block">@lang('Pending without webhook updates for'): {{ $health['pending_without_webhook_minutes'] }} @lang('minutes')</span>
+                    @endif
                 </div>
             @endif
 
@@ -224,19 +244,25 @@
                         <tr>
                             <th>@lang('Error Code')</th>
                             <th>@lang('Error Title')</th>
+                            <th>@lang('Action Required')</th>
                             <th>@lang('Count')</th>
                         </tr>
                     </thead>
                     <tbody>
                         @forelse ($failures as $failure)
+                            @php
+                                $failureCode = (string) ($failure->error_code ?? '');
+                                $failureAdvice = $errorAdviceByCode[$failureCode] ?? 'Review Meta error details and retry only after root cause is fixed.';
+                            @endphp
                             <tr>
                                 <td>{{ $failure->error_code }}</td>
                                 <td>{{ $failure->error_title }}</td>
+                                <td>{{ $failureAdvice }}</td>
                                 <td>{{ $failure->total }}</td>
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="3" class="text-center">@lang('No failure records found')</td>
+                                <td colspan="4" class="text-center">@lang('No failure records found')</td>
                             </tr>
                         @endforelse
                     </tbody>
@@ -330,8 +356,14 @@
                             <tr>
                                 <td>
                                     {{ @$campaignContact->contact->mobileNumber }}
-                                    @if ($campaignContact->meta_error_title)
-                                        <div class="text--danger fs-12">{{ $campaignContact->meta_error_title }}</div>
+                                    @php
+                                        $contactErrorText = $campaignContact->meta_error_details ?: $campaignContact->meta_error_title;
+                                    @endphp
+                                    @if ($contactErrorText)
+                                        <div class="text--danger fs-12">{{ \Illuminate\Support\Str::limit($contactErrorText, 260) }}</div>
+                                        @if ($campaignContact->meta_error_code)
+                                            <div class="text--muted fs-11">@lang('Code'): {{ $campaignContact->meta_error_code }}</div>
+                                        @endif
                                     @endif
                                 </td>
                                 <td>@php echo $campaignContact->statusBadge; @endphp</td>
@@ -367,6 +399,13 @@
             $('.filter-form').find('select').on('change', function() {
                 $('.filter-form').submit();
             });
+
+            const pendingDelivery = Number(@json((int) ($summary['pending_delivery'] ?? 0)));
+            if (pendingDelivery > 0) {
+                setTimeout(function() {
+                    window.location.reload();
+                }, 30000);
+            }
         })(jQuery);
     </script>
 @endpush

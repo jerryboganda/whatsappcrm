@@ -2,15 +2,16 @@ const UPLOAD_STATE_KEY = "group_extraction_upload_state";
 
 let cachedConfig = null;
 let isBusy = false;
-let lastDiagnostics = null;
 let lastScan = {
     group_name: "",
     group_identifier: "",
-    source: "",
     members: [],
+    source: "",
+    expected_count: 0,
     stats: {
         invalid_count: 0,
         duplicate_count: 0,
+        name_only_count: 0,
     },
 };
 
@@ -24,6 +25,11 @@ const memberCountEl = document.getElementById("memberCount");
 const invalidCountEl = document.getElementById("invalidCount");
 const duplicateCountEl = document.getElementById("duplicateCount");
 const configStateEl = document.getElementById("configState");
+const scanSourceEl = document.getElementById("scanSource");
+const expectedCountEl = document.getElementById("expectedCount");
+const expectedRowEl = document.getElementById("expectedRow");
+const nameOnlyCountEl = document.getElementById("nameOnlyCount");
+const nameOnlyRowEl = document.getElementById("nameOnlyRow");
 
 scanBtn.addEventListener("click", scanMembers);
 importBtn.addEventListener("click", importMembers);
@@ -59,25 +65,35 @@ async function scanMembers() {
     lastScan = {
         group_name: response.group_name || "WhatsApp Group",
         group_identifier: response.group_identifier || "",
-        source: response.source || "",
         members: response.members || [],
+        source: response.source || "unknown",
+        expected_count: Number(response?.expected_count || 0),
         stats: {
             invalid_count: Number(response?.stats?.invalid_count || 0),
             duplicate_count: Number(response?.stats?.duplicate_count || 0),
+            name_only_count: Number(response?.stats?.name_only_count || 0),
         },
     };
-    lastDiagnostics = response?.diagnostics || null;
 
     renderScanSummary();
-    const sourceTag = lastScan.source ? ` (${lastScan.source})` : "";
-    const mainCount = Number(lastDiagnostics?.main?.count || 0);
-    const domCount = Number(lastDiagnostics?.dom?.count || 0);
-    const domHints = Number(lastDiagnostics?.dom?.diagnostics?.container_phone_hints || 0);
-    const mainErr = String(lastDiagnostics?.main?.error || "").trim();
-    const diagTag = (lastDiagnostics && lastScan.source === "dom_fallback_v2")
-        ? ` [main:${mainCount} dom:${domCount}${domHints ? ` hints:${domHints}` : ""}${mainErr ? ` err:${mainErr.slice(0, 40)}` : ""}]`
-        : "";
-    setStatus(`Scan complete${sourceTag}. ${lastScan.members.length} unique members captured.${diagTag}`);
+
+    const ver = response._v || "?";
+    const src = lastScan.source === "runtime" ? "Runtime" : "DOM";
+    const diag = response._diag || {};
+    let statusMsg = `[v${ver}] ${src}: ${lastScan.members.length} members captured.`;
+    if (lastScan.expected_count > 0) {
+        statusMsg += ` (expected ~${lastScan.expected_count})`;
+    }
+    if (lastScan.stats.name_only_count > 0) {
+        statusMsg += ` +${lastScan.stats.name_only_count} name-only (no phone in DOM).`;
+    }
+    if (diag.mainErr) {
+        statusMsg += ` [main-err: ${diag.mainErr}]`;
+    }
+    if (response._errors?.length) {
+        statusMsg += ` [diag: ${response._errors.join(", ")}]`;
+    }
+    setStatus(statusMsg);
 }
 
 async function importMembers() {
@@ -233,6 +249,25 @@ function renderScanSummary() {
     memberCountEl.textContent = String(lastScan.members.length);
     invalidCountEl.textContent = String(lastScan.stats.invalid_count || 0);
     duplicateCountEl.textContent = String(lastScan.stats.duplicate_count || 0);
+
+    // Source
+    scanSourceEl.textContent = lastScan.source === "runtime" ? "Runtime (full extraction)" : lastScan.source === "dom" ? "DOM (partial — unsaved contacts only)" : "-";
+
+    // Expected count
+    if (lastScan.expected_count > 0) {
+        expectedCountEl.textContent = String(lastScan.expected_count);
+        expectedRowEl.style.display = "";
+    } else {
+        expectedRowEl.style.display = "none";
+    }
+
+    // Name-only count
+    if (lastScan.stats.name_only_count > 0) {
+        nameOnlyCountEl.textContent = String(lastScan.stats.name_only_count);
+        nameOnlyRowEl.style.display = "";
+    } else {
+        nameOnlyRowEl.style.display = "none";
+    }
 }
 
 function renderConfigState() {

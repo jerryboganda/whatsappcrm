@@ -9,3 +9,4 @@ Artisan::command('inspire', function () {
 
 use Illuminate\Support\Facades\Schedule;
 Schedule::command('template:update-status')->everyThirtyMinutes();
+Schedule::command('whatsapp:webhook:sync')->dailyAt('02:15');
