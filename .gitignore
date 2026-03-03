@@ -1,2 +1,14 @@
 # Large binary update file (not needed for dev)
 core_update.b64
+
+# Laravel runtime/generated files (production churn)
+/core/storage/logs/*.log
+/core/storage/debugbar/*.json
+/core/storage/framework/sessions/*
+!/core/storage/framework/sessions/.gitignore
+/core/storage/framework/views/*.php
+!/core/storage/framework/views/.gitignore
+/core/storage/framework/cache/data/**
+!/core/storage/framework/cache/.gitignore
+/core/bootstrap/cache/*.php
+!/core/bootstrap/cache/.gitignore
