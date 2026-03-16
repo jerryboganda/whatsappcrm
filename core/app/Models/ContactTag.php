@@ -8,6 +8,13 @@ use Illuminate\Database\Eloquent\Model;
 class ContactTag extends Model
 {
     use ApiQuery;
+
+    protected $fillable = [
+        'user_id',
+        'name',
+        'created_at',
+        'updated_at',
+    ];
     
     public function user()
     {

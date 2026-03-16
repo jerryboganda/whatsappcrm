@@ -7,6 +7,7 @@ use App\Lib\Searchable;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\Paginator;
+use Illuminate\Support\Facades\URL;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -24,6 +25,11 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Paginator::useBootstrapFive();
+
+        if (filter_var(config('app.url'), FILTER_VALIDATE_URL) && str_starts_with(config('app.url'), 'https://') && env('FORCE_HTTPS', false)) {
+            URL::forceRootUrl(config('app.url'));
+            URL::forceScheme('https');
+        }
         
         Builder::macro("firstOrFailWithApi", function ($modelName = "data") {
             $data = $this->first();

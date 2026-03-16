@@ -18,14 +18,20 @@
                                 <input type="hidden" name="token" value="{{ @$token }}">
                                 <div class="form-group">
                                     <label class="form-label">@lang('Password')</label>
-                                    <input type="password"
-                                        class="form-control form--control @gs('secure_password')secure-password @endgs"
-                                        name="password" required>
+                                    <div class="position-relative">
+                                        <input type="password"
+                                            class="form-control form--control @gs('secure_password')secure-password @endgs"
+                                            name="password" required>
+                                        <span class="password-show-hide fas toggle-password fa-eye-slash"></span>
+                                    </div>
                                 </div>
                                 <div class="form-group">
                                     <label class="form-label">@lang('Confirm Password')</label>
-                                    <input type="password" class="form-control form--control" name="password_confirmation"
-                                        required>
+                                    <div class="position-relative">
+                                        <input type="password" class="form-control form--control" name="password_confirmation"
+                                            required>
+                                        <span class="password-show-hide fas toggle-password fa-eye-slash"></span>
+                                    </div>
                                 </div>
                                 <div class="form-group">
                                     <button type="submit" class="btn btn--base w-100 btn-shadow"> 

@@ -1042,7 +1042,7 @@
                 }
             });
 
-            $(document).on('click', '#confirmDeleteBtn', function() {
+            $(document).on('click', '#confirmBulkDeleteBtn', function() {
                 // Fail-safe: Ensure input is populated
                 var val = $('#finalBulkDeleteIds').val();
                 if (!val || val === '[]') {
@@ -1112,7 +1112,7 @@
                     <p class="text--secondary mb-4">@lang('You are about to delete') <span class="count fw-bold"></span> @lang('contacts. This action cannot be undone.')</p>
                     <div class="d-flex justify-content-center gap-3">
                         <button type="button" class="btn btn--secondary" data-bs-dismiss="modal">@lang('Cancel')</button>
-                        <button type="button" class="btn btn--danger" id="confirmDeleteBtn">@lang('Yes, Delete')</button>
+                        <button type="button" class="btn btn--danger" id="confirmBulkDeleteBtn">@lang('Yes, Delete')</button>
                     </div>
                 </div>
             </div>

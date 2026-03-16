@@ -12,3 +12,16 @@ core_update.b64
 !/core/storage/framework/cache/.gitignore
 /core/bootstrap/cache/*.php
 !/core/bootstrap/cache/.gitignore
+
+# Local-only deploy helpers and artifacts
+/.htaccess
+/router.php
+/CON
+/NUL
+/*.sql
+/core/.env.bak*
+/core/*Feature_Documentation*.pdf
+/core/*Feature_Breakdown*.pdf
+/core/admin_menu_snapshot.json
+/core/feature_list_raw.txt
+/core/user_sidebar_snapshot.blade.php

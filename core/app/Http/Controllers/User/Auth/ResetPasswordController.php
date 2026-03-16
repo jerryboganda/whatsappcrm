@@ -13,8 +13,7 @@ class ResetPasswordController extends Controller
 {
     public function showResetForm(Request $request, $token = null)
     {
-        $email = session('fpass_email');
-        $token = session()->has('token') ? session('token') : $token;
+        $email = $request->query('email', session('fpass_email'));
         $resetToken = PasswordReset::where('token', $token)->where('email', $email)->count();
         if ($resetToken != 1) {
             $notify[] = ['error', 'Invalid token'];
@@ -49,6 +48,7 @@ class ResetPasswordController extends Controller
             'time' => @$userIpInfo['time']
         ], ['email']);
 
+        session()->forget('fpass_email');
 
         $notify[] = ['success', 'Password changed successfully'];
         return to_route('user.login')->withNotify($notify);

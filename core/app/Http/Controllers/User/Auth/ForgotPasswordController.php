@@ -90,8 +90,8 @@ class ForgotPasswordController extends Controller
             return to_route('user.password.request')->withNotify($notify);
         }
         $notify[] = ['success', 'You can change your password'];
-        session()->flash('fpass_email', $request->email);
-        return to_route('user.password.reset', $code)->withNotify($notify);
+        session()->put('fpass_email', $request->email);
+        return to_route('user.password.reset', ['token' => $code, 'email' => $request->email])->withNotify($notify);
     }
 
 }

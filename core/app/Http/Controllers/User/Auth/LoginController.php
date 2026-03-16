@@ -15,11 +15,13 @@ class LoginController extends Controller
 
     use AuthenticatesUsers;
 
-    protected $username;
-
-    public function __construct()
+    protected function resolveLoginField(Request $request): string
     {
-        $this->username = $this->findUsername();
+        $login = (string) $request->input('username');
+        $fieldType = filter_var($login, FILTER_VALIDATE_EMAIL) ? 'email' : 'username';
+        $request->merge([$fieldType => $login]);
+
+        return $fieldType;
     }
 
     public function showLoginForm()
@@ -64,23 +66,20 @@ class LoginController extends Controller
 
     public function findUsername()
     {
-        $login = request()->input('username');
-
-        $fieldType = filter_var($login, FILTER_VALIDATE_EMAIL) ? 'email' : 'username';
-        request()->merge([$fieldType => $login]);
-        return $fieldType;
+        return $this->resolveLoginField(request());
     }
 
     public function username()
     {
-        return $this->username;
+        return $this->findUsername();
     }
 
     protected function validateLogin($request)
     {
+        $field = $this->resolveLoginField($request);
 
         $validator = Validator::make($request->all(), [
-            $this->username() => 'required|string',
+            $field           => 'required|string',
             'password'        => 'required|string',
         ]);
 
@@ -140,6 +139,8 @@ class LoginController extends Controller
 
     protected function credentials(Request $request)
     {
-        return array_merge($request->only($this->username(), 'password'), ['is_deleted' => Status::NO]);
+        $field = $this->resolveLoginField($request);
+
+        return array_merge($request->only($field, 'password'), ['is_deleted' => Status::NO]);
     }
 }

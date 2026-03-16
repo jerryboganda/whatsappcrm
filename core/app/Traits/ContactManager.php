@@ -500,14 +500,10 @@ trait ContactManager
         // Debugging: Log the entire request data
         \Log::info('Bulk Delete Request Data:', $request->all());
 
-        $request->validate([
-            'ids' => 'required',
-        ]);
+        $ids = $this->normalizeDeleteIds($request);
 
-        $ids = json_decode($request->ids, true);
-
-        if (!is_array($ids)) {
-            $notify[] = ['error', 'Invalid selection data'];
+        if (!$ids) {
+            $notify[] = ['error', 'Please select at least one contact'];
             return back()->withNotify($notify);
         }
 
@@ -536,6 +532,36 @@ trait ContactManager
 
         $notify[] = ['success', "$deletedCount contacts deleted successfully." . ($skippedCount > 0 ? " ($skippedCount skipped)" : "")];
         return back()->withNotify($notify);
+    }
+
+    private function normalizeDeleteIds(Request $request): array
+    {
+        $rawIds = $request->input('ids', $request->input('id', $request->input('contact_id')));
+
+        if (is_string($rawIds)) {
+            $decodedIds = json_decode($rawIds, true);
+
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decodedIds)) {
+                $rawIds = $decodedIds;
+            } elseif (str_contains($rawIds, ',')) {
+                $rawIds = array_map('trim', explode(',', $rawIds));
+            } else {
+                $rawIds = [$rawIds];
+            }
+        }
+
+        if (is_numeric($rawIds)) {
+            $rawIds = [$rawIds];
+        }
+
+        if (!is_array($rawIds)) {
+            return [];
+        }
+
+        $ids = array_map(fn($id) => (int) $id, $rawIds);
+        $ids = array_filter($ids, fn($id) => $id > 0);
+
+        return array_values(array_unique($ids));
     }
 
     public function searchContact()
